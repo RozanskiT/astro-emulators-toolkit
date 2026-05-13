@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Astro Emulators Toolkit"
+authors:
+  - family-names: "Rozanski"
+    given-names: "Tomasz"
+repository-code: "https://github.com/RozanskiT/astro-emulators-toolkit"
+url: "https://github.com/RozanskiT/astro-emulators-toolkit"
+license: "MIT"
+version: "0.1.0"
+date-released: 2026-04-13
+abstract: "Bundle-first JAX + Flax NNX toolkit for astrophysical emulators."
+keywords:
+  - astrophysics
+  - emulator
+  - jax
+  - flax

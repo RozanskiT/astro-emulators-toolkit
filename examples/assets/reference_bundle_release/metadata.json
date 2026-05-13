@@ -1,0 +1,220 @@
+{
+  "bundle_format_version": 1,
+  "config_schema_version": 1,
+  "extras": {
+    "notes": "Inputs are min-max scaled before training using the fixed bounds stored in this bundle. Output reference scaling metadata is recorded separately and is identity.",
+    "wavelength_angstrom": {
+      "__aet_sidecar__": {
+        "format": "safetensors_v1",
+        "layout": "single_array_v1",
+        "path": "extras/wavelength_angstrom.safetensors"
+      }
+    }
+  },
+  "fingerprint_evaluation": {
+    "atol": 1e-07,
+    "inputs": {
+      "filename": "fingerprint_evaluation/inputs.safetensors",
+      "format": "safetensors_v1",
+      "layout": "numeric_dict_tree_v1",
+      "space": "canonical_input_dict_trees_v1"
+    },
+    "kind": "canonical_inputs_outputs_v1",
+    "outputs": {
+      "filename": "fingerprint_evaluation/outputs.safetensors",
+      "format": "safetensors_v1",
+      "layout": "numeric_dict_tree_v1",
+      "space": "canonical_output_dict_trees_v1"
+    },
+    "rtol": 1e-05,
+    "selection_strategy": "midpoint_from_input_domain_then_reference_scaling_inputs_v1"
+  },
+  "fit_method": "gradient",
+  "model_family_id": "mlp_v1",
+  "model_init": {
+    "hints": {
+      "input_last_axis": 3,
+      "output_last_axis": 500
+    },
+    "representation": "model-local init hints only"
+  },
+  "provenance": {
+    "created_at": "2026-04-20T04:22:43.298214+00:00",
+    "dependencies": {
+      "flax": "0.12.6",
+      "jax": "0.9.2",
+      "numpy": "2.4.4",
+      "optax": "0.2.8"
+    },
+    "git_commit": "8d46f0a70583bee4bfca376c90ab10ffc35ab9c3",
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "python_version": "3.12.13",
+    "toolkit": "astro_emulators_toolkit",
+    "toolkit_version": "0.1.0"
+  },
+  "release": {
+    "name": "payne-flux-reference-example",
+    "status": "released",
+    "version": "0.1.0"
+  },
+  "resolved": {
+    "model": {
+      "name": "mlp",
+      "params": {
+        "activation": "gelu",
+        "dtype": "float32",
+        "hidden_sizes": [
+          128,
+          128
+        ],
+        "use_bias": true
+      }
+    },
+    "solver": {
+      "name": "gradient",
+      "params": {}
+    },
+    "task": {
+      "name": "regression",
+      "params": {
+        "loss": "mse",
+        "loss_weights": null,
+        "metric_axes": null,
+        "metrics": [
+          "mse",
+          "mae"
+        ]
+      }
+    }
+  },
+  "runtime_contract": {
+    "affine_leaf_specs": {
+      "inputs/parameters": {
+        "last_axis": 3,
+        "mode": "scalar_or_last_axis"
+      },
+      "outputs/flux": {
+        "last_axis": 500,
+        "mode": "scalar_or_last_axis"
+      }
+    },
+    "role_paths": {
+      "input_leaf": "inputs/parameters",
+      "output_leaf": "outputs/flux"
+    },
+    "surface": "canonical_dict_trees_v1"
+  },
+  "spec": {
+    "input_domain": {
+      "kind": "box_v1",
+      "max_tree": {
+        "parameters": [
+          7000.0,
+          5.0,
+          0.30000001192092896
+        ]
+      },
+      "min_tree": {
+        "parameters": [
+          4500.0,
+          2.5,
+          -0.30000001192092896
+        ]
+      },
+      "storage": {
+        "filename": "input_domain.safetensors",
+        "format": "safetensors_v1",
+        "layout": "split_minmax_tree_v1"
+      },
+      "value_space": "physical_input_dict_tree_v1"
+    },
+    "inputs": {
+      "channel_meanings_tree": {
+        "parameters": [
+          "effective temperature",
+          "surface gravity",
+          "metallicity [Fe/H]"
+        ]
+      },
+      "channel_names_tree": {
+        "parameters": [
+          "teff",
+          "logg",
+          "feh"
+        ]
+      },
+      "channel_units_tree": {
+        "parameters": [
+          "K",
+          "dex",
+          "dex"
+        ]
+      },
+      "leaf_meanings_tree": {
+        "parameters": "stellar labels"
+      },
+      "leaf_units_tree": null,
+      "structure_tree": {
+        "parameters": null
+      }
+    },
+    "outputs": {
+      "channel_meanings_tree": null,
+      "channel_names_tree": null,
+      "channel_units_tree": null,
+      "leaf_meanings_tree": {
+        "flux": "continuum-normalized flux vector on the shared wavelength grid"
+      },
+      "leaf_units_tree": {
+        "flux": "dimensionless"
+      },
+      "structure_tree": {
+        "flux": null
+      }
+    },
+    "reference_scaling_inputs": {
+      "applies_to": "inputs",
+      "kind": "affine_minmax_v1",
+      "max_tree": {
+        "parameters": [
+          7000.0,
+          5.0,
+          0.30000001192092896
+        ]
+      },
+      "min_tree": {
+        "parameters": [
+          4500.0,
+          2.5,
+          -0.30000001192092896
+        ]
+      },
+      "source_space": "physical_input_dict_tree_v1",
+      "storage": {
+        "filename": "reference_scaling_inputs.safetensors",
+        "format": "safetensors_v1",
+        "layout": "split_minmax_tree_v1"
+      },
+      "target_space": "canonical_input_dict_tree_v1"
+    },
+    "reference_scaling_outputs": {
+      "applies_to": "outputs",
+      "kind": "affine_minmax_v1",
+      "max_tree": {
+        "flux": 1.0
+      },
+      "min_tree": {
+        "flux": 0.0
+      },
+      "source_space": "canonical_output_dict_tree_v1",
+      "storage": {
+        "filename": "reference_scaling_outputs.safetensors",
+        "format": "safetensors_v1",
+        "layout": "split_minmax_tree_v1"
+      },
+      "target_space": "physical_output_dict_tree_v1"
+    },
+    "spec_version": 1
+  },
+  "weights_layout": "params_plus_model_state_v1"
+}

@@ -1,0 +1,47 @@
+{
+  "algorithm": "sha256",
+  "bundle_id": "sha256:c3a7b5d08d98822a8c553645387b4e89de791f43e991270803398471e78e1d8f",
+  "integrity_format_version": 1,
+  "tree": [
+    {
+      "path": "README.txt",
+      "sha256": "6a8d6a6ea9e665d4834af3e07285fce4027acd09adb847bff08a82633f800d5b"
+    },
+    {
+      "path": "config.json",
+      "sha256": "f75a262db2c158750fea3f124c5d8c8ae590797d3d63e0250b792a841d1f7b26"
+    },
+    {
+      "path": "extras/wavelength_angstrom.safetensors",
+      "sha256": "194b2e671c6995b9532cafcdeb72fbf06365dba2259611be4985836f6c617896"
+    },
+    {
+      "path": "fingerprint_evaluation/inputs.safetensors",
+      "sha256": "e411d571388dd13d2c5c9f020386c14378f2a63e63a8a28182b3ac2a45f60e60"
+    },
+    {
+      "path": "fingerprint_evaluation/outputs.safetensors",
+      "sha256": "a9555eceddf85014098c7aad0ef8052e385d008ee68582a26ba830f642d7dcc7"
+    },
+    {
+      "path": "input_domain.safetensors",
+      "sha256": "2ea76cae2ecfd992e59e04361d2c15591c2f511aa8e484e7610b4536cce55444"
+    },
+    {
+      "path": "metadata.json",
+      "sha256": "ce6fead71713299222d5da44dd54fcbed5df91004681b52d57d3273faed7bc8a"
+    },
+    {
+      "path": "reference_scaling_inputs.safetensors",
+      "sha256": "2ea76cae2ecfd992e59e04361d2c15591c2f511aa8e484e7610b4536cce55444"
+    },
+    {
+      "path": "reference_scaling_outputs.safetensors",
+      "sha256": "d1441a6518c789aff00d5c53d76898cc98b7bbdbbf39e34704102e529a923313"
+    },
+    {
+      "path": "weights/weights.safetensors",
+      "sha256": "78c6b15002b7eeae2fee03c08d4dcf19f429d9742e8710c3aa013e980ae372d9"
+    }
+  ]
+}

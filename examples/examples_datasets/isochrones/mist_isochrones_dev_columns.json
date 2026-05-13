@@ -1,0 +1,69 @@
+{
+  "columns": [
+    "log10_isochrone_age_yr",
+    "initial_mass",
+    "log_Teff",
+    "log_g",
+    "Gaia_G_EDR3",
+    "Gaia_BP_EDR3",
+    "Gaia_RP_EDR3",
+    "eep",
+    "feh"
+  ],
+  "dtype": "float32",
+  "shape": [
+    34229,
+    9
+  ],
+  "filters": {
+    "feh_min": -0.5,
+    "feh_max": 0.5,
+    "afe": 0.0,
+    "v_vcrit": 0.0,
+    "eep_min": 202,
+    "eep_max": 605,
+    "initial_mass_point_stride": 5
+  },
+  "source_files": [
+    {
+      "file": "MIST_v2.5/UBVRIplus/feh_m050_afe_p0_vvcrit0.0_full.iso.UBVRIplus",
+      "feh": -0.5,
+      "n_isochrones": 107,
+      "initial_mass_point_stride": 5,
+      "kept_isochrones": 107,
+      "kept_rows": 6910
+    },
+    {
+      "file": "MIST_v2.5/UBVRIplus/feh_m025_afe_p0_vvcrit0.0_full.iso.UBVRIplus",
+      "feh": -0.25,
+      "n_isochrones": 107,
+      "initial_mass_point_stride": 5,
+      "kept_isochrones": 107,
+      "kept_rows": 6887
+    },
+    {
+      "file": "MIST_v2.5/UBVRIplus/feh_p000_afe_p0_vvcrit0.0_full.iso.UBVRIplus",
+      "feh": 0.0,
+      "n_isochrones": 107,
+      "initial_mass_point_stride": 5,
+      "kept_isochrones": 107,
+      "kept_rows": 6916
+    },
+    {
+      "file": "MIST_v2.5/UBVRIplus/feh_p025_afe_p0_vvcrit0.0_full.iso.UBVRIplus",
+      "feh": 0.25,
+      "n_isochrones": 107,
+      "initial_mass_point_stride": 5,
+      "kept_isochrones": 107,
+      "kept_rows": 6941
+    },
+    {
+      "file": "MIST_v2.5/UBVRIplus/feh_p050_afe_p0_vvcrit0.0_full.iso.UBVRIplus",
+      "feh": 0.5,
+      "n_isochrones": 107,
+      "initial_mass_point_stride": 5,
+      "kept_isochrones": 107,
+      "kept_rows": 6575
+    }
+  ]
+}

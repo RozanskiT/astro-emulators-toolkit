@@ -1,0 +1,39 @@
+{
+  "algorithm": "sha256",
+  "bundle_id": "sha256:b9c7e6478d45ec5f925338187f4df684d039f83b0efd605430123023e4126efa",
+  "integrity_format_version": 1,
+  "tree": [
+    {
+      "path": "README.txt",
+      "sha256": "1d39ca8ccc37fa1fb209da5136ebb169cc53bb6cc3e3de4f35f4a1db17ac2497"
+    },
+    {
+      "path": "config.json",
+      "sha256": "f75a262db2c158750fea3f124c5d8c8ae590797d3d63e0250b792a841d1f7b26"
+    },
+    {
+      "path": "extras/wavelength_angstrom.safetensors",
+      "sha256": "194b2e671c6995b9532cafcdeb72fbf06365dba2259611be4985836f6c617896"
+    },
+    {
+      "path": "input_domain.safetensors",
+      "sha256": "2ea76cae2ecfd992e59e04361d2c15591c2f511aa8e484e7610b4536cce55444"
+    },
+    {
+      "path": "metadata.json",
+      "sha256": "7fe5d86366e88bebc0a0ef76537f60bea4d703fcbe2cea3b4dd02590694ff5ef"
+    },
+    {
+      "path": "reference_scaling_inputs.safetensors",
+      "sha256": "2ea76cae2ecfd992e59e04361d2c15591c2f511aa8e484e7610b4536cce55444"
+    },
+    {
+      "path": "reference_scaling_outputs.safetensors",
+      "sha256": "d1441a6518c789aff00d5c53d76898cc98b7bbdbbf39e34704102e529a923313"
+    },
+    {
+      "path": "weights/weights.safetensors",
+      "sha256": "78c6b15002b7eeae2fee03c08d4dcf19f429d9742e8710c3aa013e980ae372d9"
+    }
+  ]
+}

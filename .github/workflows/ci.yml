@@ -1,0 +1,228 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync lint environment
+        run: uv sync --frozen
+      - name: Ruff lint
+        run: uv run --frozen ruff check .
+      - name: Ruff format check
+        run: uv run --frozen ruff format --check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync type-check environment
+        run: uv sync --frozen
+      - name: Typed package mypy gate
+        run: uv run --frozen mypy
+
+  base-inference:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Sync base environment
+        run: uv sync --frozen
+      - name: Verify shipped released bundle fingerprint
+        run: |
+          uv run --frozen python - <<'PY'
+          from pathlib import Path
+
+          from astro_emulators_toolkit.bundle import verify_bundle_fingerprint_evaluation
+
+          bundle = Path("examples/assets/reference_bundle_release")
+          summary = verify_bundle_fingerprint_evaluation(bundle)
+          print(f"Verified released bundle fingerprint: {summary}")
+          PY
+      - name: Bundle loading inference suite
+        run: |
+          uv run --frozen pytest -q tests/bundle/test_bundle_resolution.py
+          uv run --frozen pytest -q tests/bundle/test_bundle_spec.py
+          uv run --frozen pytest -q tests/api/test_optional_dependency_surface.py tests/api/test_public_surface.py
+          uv run --frozen pytest -q tests/examples/test_examples_metadata.py::test_bundle_metadata_portability_example_runs
+
+  astronomer-example-smokes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync project environment
+        run: uv sync --frozen
+      - name: Astronomer-facing example smokes
+        run: uv run --frozen pytest -q tests/examples/test_examples_metadata.py
+
+  blackjax-example-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync BlackJAX environment
+        run: uv sync --frozen --extra blackjax
+      - name: BlackJAX example smoke
+        run: uv run --frozen pytest -q tests/examples/test_examples_metadata.py::test_advanced_blackjax_example_runs_when_extra_installed
+
+  training:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync project environment
+        run: uv sync --frozen
+      - name: Training suite
+        run: |
+          uv run --frozen pytest -q tests/training
+          uv run --frozen pytest -q tests/models/test_cannon_numerics.py
+          uv run --frozen pytest -q tests/examples/test_intensity_data.py
+
+  transformer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync transformer environment
+        run: uv sync --frozen
+      - name: Transformer suite
+        run: |
+          uv run --frozen pytest -q tests/models/test_transformer_payne.py
+          uv run --frozen pytest -q tests/models/test_transformer_payne_batch.py
+          uv run --frozen pytest -q tests/models/test_transformer_payne_bundle.py
+          uv run --frozen pytest -q tests/models/test_transformer_payne_channel_contract.py
+          uv run --frozen pytest -q tests/models/test_transformer_payne_wavelength_ranges.py
+
+  release-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Sync release environment
+        run: uv sync --frozen
+      - name: Export tiny bundle from source checkout
+        run: |
+          mkdir -p .release-smoke
+          uv run --frozen python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+
+          from astro_emulators_toolkit import Emulator
+          from astro_emulators_toolkit.config import IOSpec, ModelSpec, OptimConfig, RootConfig, TaskSpec, TrainConfig
+          from astro_emulators_toolkit.data import TreeArrayDataset
+
+          x = np.random.default_rng(0).normal(size=(16, 3)).astype(np.float32)
+          y = (x @ np.array([[0.5], [-0.2], [0.1]], dtype=np.float32)).astype(np.float32)
+          ds = TreeArrayDataset(x={"parameters": x}, y={"predictions": y})
+          cfg = RootConfig(
+              io=IOSpec(),
+              model=ModelSpec(name="mlp", params={"hidden_sizes": (8,), "activation": "tanh"}),
+              task=TaskSpec(name="regression", params={"loss": "mse"}),
+              optim=OptimConfig(name="adam", lr=1e-3),
+              training=TrainConfig(
+                  workdir=".release-smoke/workdir",
+                  batch_size=8,
+                  num_steps=2,
+                  evaluation_interval_steps=1,
+              ),
+          )
+
+          out = Path(".release-smoke/exported_bundle")
+          emu = Emulator.from_config(cfg)
+          emu.fit(ds, validation_dataset=ds, callbacks=[])
+          emu.save_bundle(out)
+          print(f"Exported bundle: {out}")
+          PY
+      - name: Prepare and verify released smoke bundle
+        run: |
+          uv run --frozen python - <<'PY'
+          from pathlib import Path
+
+          from astro_emulators_toolkit.bundle import (
+              prepare_bundle_release,
+              verify_bundle_fingerprint_evaluation,
+          )
+
+          raw_bundle = Path(".release-smoke/exported_bundle")
+          released_bundle = Path(".release-smoke/released_bundle")
+          prepare_bundle_release(
+              raw_bundle,
+              path=released_bundle,
+              release_name="release-smoke-bundle",
+              release_version="0.0.0",
+              fingerprint_inputs={"parameters": [0.0, 0.0, 0.0]},
+          )
+          summary = verify_bundle_fingerprint_evaluation(released_bundle)
+          print(f"Verified smoke release bundle fingerprint: {summary}")
+          PY
+      - name: Build release artifacts
+        run: |
+          uv build
+      - name: Check release metadata
+        run: uv run --frozen twine check dist/*
+      - name: Install built wheel in clean environment
+        run: |
+          uv venv .release-venv --python ${{ matrix.python-version }}
+          .release-venv/bin/python -m ensurepip --upgrade
+          .release-venv/bin/python -m pip install --upgrade pip
+          .release-venv/bin/python -m pip install dist/*.whl
+      - name: Load demo bundle
+        run: .release-venv/bin/python examples/basic/02_load_bundle_predict.py
+      - name: Load freshly exported bundle from installed wheel
+        run: |
+          .release-venv/bin/python - <<'PY'
+          from pathlib import Path
+
+          import numpy as np
+
+          from astro_emulators_toolkit import Emulator
+
+          bundle = Path(".release-smoke/exported_bundle")
+          pred = Emulator.from_bundle(bundle).predict({"parameters": np.zeros((2, 3), dtype=np.float32)})
+          assert pred["predictions"].shape == (2, 1)
+          print(f"Reloaded bundle prediction shape: {pred['predictions'].shape}")
+          PY

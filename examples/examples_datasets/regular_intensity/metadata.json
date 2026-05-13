@@ -1,0 +1,145 @@
+{
+  "dataset_name": "regular_intensity",
+  "dataset_type": "raw_intensity",
+  "description": "Raw line and continuum intensity dataset repacked from the regular toy raw HDF5 grid.",
+  "provenance": {
+    "generator": "custom Korg spectrum synthesis with a MARCS atmosphere grid",
+    "source_script": "korg_grid_toolkit_test_data/compute_spectra.jl",
+    "linelist_path": "linelists/gfall08oct17_100_20000.dat (local absolute path omitted)",
+    "linelist_format": "kurucz",
+    "raw_grid_subdirectory": "regular_grid",
+    "star_ordering": "Rows are grouped by raw star in natural filename order. Within each star, rows follow the raw mu_points ordering from the HDF5 file.",
+    "intensity_subsampling": "Kept every second raw intensity row, leaving 10 mu values per star.",
+    "validation": {
+      "last_raw_star_checked": "star_198.hdf5",
+      "checks": [
+        "final parameter block matches raw last star",
+        "final intensity_lines block matches raw last star",
+        "final intensity_continuum block matches raw last star",
+        "shared wavelength arrays match raw wavelength grids"
+      ]
+    }
+  },
+  "physical_units": {
+    "intensity_lines.npy": "erg/cm^2/s/nm/steradian",
+    "intensity_continuum.npy": "erg/cm^2/s/nm/steradian",
+    "note": "Raw intensities use the Korg intensity convention."
+  },
+  "files": {
+    "parameters.npy": {
+      "dtype": "float32",
+      "shape": [
+        1980,
+        4
+      ],
+      "description": "Per-ray parameters aligned row-by-row with intensity_lines.npy and intensity_continuum.npy.",
+      "columns": [
+        {
+          "index": 0,
+          "name": "teff",
+          "unit": "K",
+          "description": "Effective temperature",
+          "min": 4500.0,
+          "max": 7000.0,
+          "unique_values": [
+            4500.0,
+            4750.0,
+            5000.0,
+            5250.0,
+            5500.0,
+            5750.0,
+            6000.0,
+            6250.0,
+            6500.0,
+            6750.0,
+            7000.0
+          ]
+        },
+        {
+          "index": 1,
+          "name": "logg",
+          "unit": "dex",
+          "description": "log10 surface gravity in cgs",
+          "min": 2.5,
+          "max": 5.0,
+          "unique_values": [
+            2.5,
+            3.0,
+            3.5,
+            4.0,
+            4.5,
+            5.0
+          ]
+        },
+        {
+          "index": 2,
+          "name": "feh",
+          "unit": "dex",
+          "description": "Metallicity [Fe/H]",
+          "min": -0.30000001192092896,
+          "max": 0.30000001192092896,
+          "unique_values": [
+            -0.3,
+            0.0,
+            0.3
+          ]
+        },
+        {
+          "index": 3,
+          "name": "mu",
+          "unit": "dimensionless",
+          "description": "Cosine of the viewing angle",
+          "min": 0.0034357004333287477,
+          "max": 0.9819859862327576,
+          "unique_values": [
+            0.003436,
+            0.043883,
+            0.126834,
+            0.244567,
+            0.386107,
+            0.538263,
+            0.686853,
+            0.818027,
+            0.919558,
+            0.981986
+          ]
+        }
+      ],
+      "rows_per_star": 10
+    },
+    "intensity_lines.npy": {
+      "dtype": "float32",
+      "shape": [
+        1980,
+        500
+      ],
+      "description": "Raw line intensities on the shared line wavelength grid.",
+      "unit": "erg/cm^2/s/nm/steradian"
+    },
+    "intensity_continuum.npy": {
+      "dtype": "float32",
+      "shape": [
+        1980,
+        50
+      ],
+      "description": "Raw continuum intensities on the shared continuum wavelength grid.",
+      "unit": "erg/cm^2/s/nm/steradian"
+    },
+    "wavelength_lines.npy": {
+      "dtype": "float64",
+      "shape": [
+        500
+      ],
+      "description": "Shared wavelength grid for intensity_lines.npy.",
+      "unit": "Angstrom"
+    },
+    "wavelength_continuum.npy": {
+      "dtype": "float64",
+      "shape": [
+        50
+      ],
+      "description": "Shared wavelength grid for intensity_continuum.npy.",
+      "unit": "Angstrom"
+    }
+  }
+}

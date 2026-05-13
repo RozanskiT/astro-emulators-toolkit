@@ -1,0 +1,78 @@
+{
+  "dataset_name": "irregular_flux",
+  "dataset_type": "normalized_flux",
+  "description": "Normalized flux dataset repacked from the irregular toy raw HDF5 grid.",
+  "provenance": {
+    "generator": "custom Korg spectrum synthesis with a MARCS atmosphere grid",
+    "source_script": "korg_grid_toolkit_test_data/compute_spectra.jl",
+    "linelist_path": "linelists/gfall08oct17_100_20000.dat (local absolute path omitted)",
+    "linelist_format": "kurucz",
+    "raw_grid_subdirectory": "irregular_grid",
+    "star_ordering": "Rows follow natural sorting of raw star_*.hdf5 filenames (star_1, star_2, ..., star_N).",
+    "validation": {
+      "last_raw_star_checked": "star_1000.hdf5",
+      "checks": [
+        "final parameter row matches raw last star",
+        "final normalized flux row matches raw last star after linear-interpolation continuum upsampling",
+        "shared wavelength array matches raw line wavelength grid"
+      ]
+    }
+  },
+  "normalization": {
+    "method": "Flux is divided by the continuum after linear interpolation from the continuum wavelength grid onto the line wavelength grid.",
+    "output_unit": "dimensionless"
+  },
+  "files": {
+    "parameters.npy": {
+      "dtype": "float32",
+      "shape": [
+        1000,
+        3
+      ],
+      "description": "Per-star parameters aligned row-by-row with normalized_flux.npy.",
+      "columns": [
+        {
+          "index": 0,
+          "name": "teff",
+          "unit": "K",
+          "description": "Effective temperature",
+          "min": 4503.34619140625,
+          "max": 6992.86328125
+        },
+        {
+          "index": 1,
+          "name": "logg",
+          "unit": "dex",
+          "description": "log10 surface gravity in cgs",
+          "min": 2.5007705688476562,
+          "max": 4.999166488647461
+        },
+        {
+          "index": 2,
+          "name": "feh",
+          "unit": "dex",
+          "description": "Metallicity [Fe/H]",
+          "min": -0.2995113730430603,
+          "max": 0.29834437370300293
+        }
+      ]
+    },
+    "normalized_flux.npy": {
+      "dtype": "float32",
+      "shape": [
+        1000,
+        500
+      ],
+      "description": "Continuum-normalized flux spectra sampled on the shared line wavelength grid.",
+      "unit": "dimensionless"
+    },
+    "wavelength.npy": {
+      "dtype": "float64",
+      "shape": [
+        500
+      ],
+      "description": "Shared wavelength grid for normalized_flux.npy.",
+      "unit": "Angstrom"
+    }
+  }
+}

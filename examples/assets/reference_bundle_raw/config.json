@@ -1,0 +1,111 @@
+{
+  "bundle": {
+    "bundle_subdir": "bundle"
+  },
+  "hub": {
+    "repo_id": null,
+    "revision": null
+  },
+  "io": {
+    "input_domain": null,
+    "inputs": {
+      "channel_meanings_tree": {
+        "parameters": [
+          "effective temperature",
+          "surface gravity",
+          "metallicity [Fe/H]"
+        ]
+      },
+      "channel_names_tree": {
+        "parameters": [
+          "teff",
+          "logg",
+          "feh"
+        ]
+      },
+      "channel_units_tree": {
+        "parameters": [
+          "K",
+          "dex",
+          "dex"
+        ]
+      },
+      "leaf_meanings_tree": {
+        "parameters": "stellar labels"
+      },
+      "leaf_units_tree": null,
+      "structure_tree": {
+        "parameters": null
+      }
+    },
+    "outputs": {
+      "channel_meanings_tree": null,
+      "channel_names_tree": null,
+      "channel_units_tree": null,
+      "leaf_meanings_tree": {
+        "flux": "continuum-normalized flux vector on the shared wavelength grid"
+      },
+      "leaf_units_tree": {
+        "flux": "dimensionless"
+      },
+      "structure_tree": {
+        "flux": null
+      }
+    },
+    "reference_scaling_inputs": null,
+    "reference_scaling_outputs": null
+  },
+  "model": {
+    "init_hints": {},
+    "name": "mlp",
+    "params": {
+      "activation": "gelu",
+      "dtype": "float32",
+      "hidden_sizes": [
+        128,
+        128
+      ]
+    }
+  },
+  "optim": {
+    "b1": 0.9,
+    "b2": 0.999,
+    "decay_steps": 0,
+    "eps": 1e-08,
+    "lr": 0.001,
+    "name": "soap",
+    "precondition_1d": false,
+    "precondition_frequency": 10,
+    "schedule": "cosine",
+    "warmup_steps": 1000,
+    "weight_decay": 1e-05
+  },
+  "schema_version": 1,
+  "seed": 0,
+  "solver": {
+    "name": "auto",
+    "params": {}
+  },
+  "task": {
+    "name": "regression",
+    "params": {
+      "loss": "mse"
+    }
+  },
+  "training": {
+    "batch_size": 128,
+    "checkpoint_interval_steps": 500,
+    "checkpoint_steps": null,
+    "evaluation_interval_steps": 500,
+    "evaluation_steps": null,
+    "logging_interval_steps": 50,
+    "logging_steps": null,
+    "max_saved_checkpoints": 5,
+    "num_steps": 10000,
+    "shuffle": true,
+    "shuffle_seed": 0,
+    "steps_per_epoch": null,
+    "val_fraction": 0.1,
+    "workdir": "./runs/from_bundle"
+  }
+}

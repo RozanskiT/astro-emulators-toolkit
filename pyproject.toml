@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=77.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astro-emulators-toolkit"
+description = "General-purpose astrophysical emulators: spectra, isochrones, and more."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE*"]
+dynamic = ["version"]
+authors = [
+    { name="Tomasz Rozanski"}
+]
+keywords = ["astrophysics", "emulator", "jax", "flax", "spectra", "isochrones"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "numpy>=2.1",
+    "jax>=0.6.0",
+    "jaxlib>=0.6.0",
+    "flax>=0.10.4",
+    "optax>=0.2.5",
+    "orbax-checkpoint>=0.11.5",
+    "huggingface_hub>=1.0.0",
+    "pyyaml>=6.0",
+    "safetensors>=0.5.0",
+]
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+blackjax = [
+    "blackjax>=1.2.5",
+]
+viz = [
+    "matplotlib>=3.9",
+]
+
+[dependency-groups]
+dev = [
+    "build>=1.2",
+    "ipykernel>=6.29",
+    "ipython>=9.0",
+    "matplotlib>=3.9",
+    "mypy>=1.11",
+    "pandas>=2.2",
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "ruff>=0.11",
+    "scipy>=1.15",
+    "twine>=6.1",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["astro_emulators_toolkit*"]
+
+[tool.setuptools.package-data]
+"astro_emulators_toolkit" = ["py.typed"]
+"astro_emulators_toolkit._vendor.soap_jax" = ["LICENSE", "README.txt"]
+
+[tool.setuptools.dynamic]
+version = {attr = "astro_emulators_toolkit._version.__version__"}
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+files = ["src/astro_emulators_toolkit"]
+exclude = ["^src/astro_emulators_toolkit/_vendor/"]
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_return_any = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["optax", "optax.*", "orbax", "orbax.*"]
+ignore_missing_imports = true
+
+[project.urls]
+Homepage = "https://github.com/RozanskiT/astro-emulators-toolkit"
+Repository = "https://github.com/RozanskiT/astro-emulators-toolkit"
+Issues = "https://github.com/RozanskiT/astro-emulators-toolkit/issues"
+Documentation = "https://github.com/RozanskiT/astro-emulators-toolkit#readme"
