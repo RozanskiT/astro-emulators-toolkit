@@ -3,11 +3,12 @@
 Data: shipped reference flux bundle + synthetic observations.
 Creates: nothing.
 Runtime: a few seconds on CPU.
+Requires: `uv sync --extra blackjax`.
 """
 
 from __future__ import annotations
 
-import blackjax
+import importlib.util
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -22,6 +23,10 @@ from _example_bundle import require_reference_bundle
 
 
 def main() -> None:
+    if importlib.util.find_spec("blackjax") is None:
+        raise SystemExit("This example requires `uv sync --extra blackjax`.")
+    import blackjax
+
     bundle = require_reference_bundle()
     emu = Emulator.from_bundle(bundle)
     # Freeze once, then jit the sampler init/transition around the full log-density.

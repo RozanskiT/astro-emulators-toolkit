@@ -1,3 +1,12 @@
+"""Resume internal RFF training state from development/02 checkpoints.
+
+Data: examples/development/data/rff.npy produced by development/01.
+Creates: examples/development/runs/rff_mlp/bundle_resumed.
+Runtime: a few seconds on CPU after development/02 has run.
+Notes: resume=True uses trainer checkpoint/run-management state from run_config.json
+and checkpoints/, not the portable bundle sharing contract.
+"""
+
 from pathlib import Path
 
 from astro_emulators_toolkit import Emulator
@@ -7,7 +16,7 @@ from astro_emulators_toolkit.training import ProgressBarLogger
 
 script_dir = Path(__file__).parent.resolve()
 
-cfg = load_config(script_dir / "runs/rff_mlp/bundle/config.json")
+cfg = load_config(script_dir / "runs/rff_mlp/run_config.json")
 data_cfg = NpyTableConfig(
     path=str(script_dir / "data/rff.npy"),
     inputs=(0, 1, 2),

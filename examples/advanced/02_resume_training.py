@@ -1,8 +1,10 @@
-"""Resume training from the bundle produced in basic/01.
+"""Resume internal training state from the run produced in basic/01.
 
 Data: irregular_flux randomized train/validation split.
 Creates: examples/runs/basic_payne_flux_mlp/bundle_resumed.
 Runtime: ~10s on CPU after basic/01 has run.
+Notes: resume=True uses trainer checkpoint/run-management state from run_config.json
+and checkpoints/, not the portable bundle sharing contract.
 """
 
 from __future__ import annotations
@@ -38,7 +40,6 @@ def main() -> None:
             smoke="examples/runs/basic_payne_flux_mlp_smoke",
         )
     )
-    base_bundle = run_dir / "bundle"
     cfg = load_config(run_dir / "run_config.json")
     original_target_steps = int(cfg.training.num_steps)
     extra_steps = 10
@@ -62,7 +63,7 @@ def main() -> None:
         max_steps=extra_steps,
         callbacks=callbacks,
     )
-    out = emu.save_bundle(base_bundle.parent / "bundle_resumed")
+    out = emu.save_bundle(run_dir / "bundle_resumed")
     print("Original target step:", original_target_steps)
     print("Resumed final step:", final_step.step)
     print(

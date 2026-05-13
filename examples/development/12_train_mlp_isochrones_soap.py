@@ -2,7 +2,7 @@
 
 Data: isochrones table split into train/validation.
 Creates: examples/runs/development_isochrone_mlp_soap/{bundle,checkpoints,history_*.csv,training_validation_curves.png,validation_parity.png}
-Runtime: minutes on CPU for 3,000 steps.
+Runtime: minutes on CPU for 10,000 steps.
 Requires: `uv sync` from a source checkout.
 """
 

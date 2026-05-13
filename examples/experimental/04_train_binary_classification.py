@@ -44,6 +44,7 @@ def main() -> None:
             workdir=str(Path("examples/runs/exp_binary_classification")),
             batch_size=128,
             num_steps=30,
+            logging_interval_steps=10,
             evaluation_interval_steps=10,
         ),
     )
@@ -59,6 +60,7 @@ def main() -> None:
     pred = emu.make_frozen_apply(jit=False)({"parameters": x_val[:4]})["predictions"]
     print("Steps:", len(history.logs.get("training_loss", [])))
     print("Probabilities:", pred[:, 0].tolist())
+    print("Saved bundle:", emu.save_bundle())
 
 
 if __name__ == "__main__":

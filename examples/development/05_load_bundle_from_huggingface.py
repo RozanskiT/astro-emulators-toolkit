@@ -32,9 +32,6 @@ def main() -> None:
         if not local_bundle.exists():
             raise SystemExit(f"Local fallback bundle not found at: {local_bundle}")
 
-    source = f"local fallback bundle ({local_bundle})"
-    emu = Emulator.from_bundle(local_bundle)
-
     if has_hf_hub:
         try:
             emu = Emulator.from_pretrained(
@@ -52,6 +49,11 @@ def main() -> None:
                 )
                 print(f"  python {(script_dir / '02_train_rff_mlp.py').as_posix()}")
                 raise
+            emu = Emulator.from_bundle(local_bundle)
+            source = f"local fallback bundle ({local_bundle})"
+    else:
+        emu = Emulator.from_bundle(local_bundle)
+        source = f"local fallback bundle ({local_bundle})"
 
     x = np.load(script_dir / "data/rff.npy")[:256, :3].astype("float32")
     y_pred = emu.predict({"parameters": x})["predictions"]

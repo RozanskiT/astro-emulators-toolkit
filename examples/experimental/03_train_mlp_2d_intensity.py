@@ -134,6 +134,7 @@ def main() -> None:
             workdir=str(Path("examples/runs/exp_mlp2d_intensity")),
             batch_size=128,
             num_steps=20,
+            logging_interval_steps=10,
             evaluation_interval_steps=10,
         ),
         io=IOSpec(
@@ -174,6 +175,7 @@ def main() -> None:
     )
     print("Example 0 MAE in log10(line intensity):", example_mae_log)
     print("Pred shape:", pred.shape)
+    print("Saved bundle:", emu.save_bundle())
 
 
 if __name__ == "__main__":

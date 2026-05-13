@@ -51,6 +51,7 @@ def main() -> None:
             workdir=str(Path("examples/runs/exp_explicit_wavelength_flux")),
             batch_size=128,
             num_steps=20,
+            logging_interval_steps=10,
             evaluation_interval_steps=10,
         ),
     )
@@ -71,8 +72,10 @@ def main() -> None:
     pred = emu.predict({"parameters": x_val[:2], "wavelengths": inference_wave})[
         "predictions"
     ]
+    bundle_dir = emu.save_bundle()
     print("Steps:", len(history.logs.get("training_loss", [])))
     print("Pred shape:", pred.shape)
+    print("Saved bundle:", bundle_dir)
 
 
 if __name__ == "__main__":
