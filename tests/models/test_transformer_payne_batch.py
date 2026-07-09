@@ -19,9 +19,26 @@ from astro_emulators_toolkit.data import TreeArrayDataset
 from astro_emulators_toolkit.models.transformer_payne_batch import (
     TransformerPayneFluxDeviceBatchTransform,
     TransformerPayneIntensityDeviceBatchTransform,
+    _sample_random_wave,
 )
 
 jax.config.update("jax_enable_x64", True)
+
+
+def test_sample_random_wave_is_unsorted_raw_uniform_stream():
+    # Pin the no-sort contract: sorting was removed because it is unnecessary
+    # (jnp.interp accepts unsorted queries; the model treats query wavelengths
+    # independently) and its CUB custom call destabilized long CUDA runs.
+    rng = jax.random.PRNGKey(0)
+    wave = _sample_random_wave(
+        rng, 4, 16, min_w=1.0, max_w=2.0, dtype=jnp.dtype(jnp.float64)
+    )
+    expected = jax.random.uniform(
+        rng, shape=(4, 16), minval=1.0, maxval=2.0, dtype=jnp.float64
+    )
+    assert wave.shape == (4, 16)
+    assert bool(jnp.all(wave == expected))
+    assert bool(jnp.all((wave >= 1.0) & (wave < 2.0)))
 
 
 def _transformer_cfg(

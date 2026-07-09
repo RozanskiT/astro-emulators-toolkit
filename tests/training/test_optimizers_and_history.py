@@ -205,6 +205,10 @@ def test_make_tx_transformer_payne_mup_scales_parameter_groups():
 
 def test_make_tx_transformer_payne_mup_depth_scales_attention_and_ff_by_depth():
     params = {
+        "param_embedding": {
+            "w0": jnp.ones((2, 8), dtype=jnp.float32),
+            "w1": jnp.ones((8, 16), dtype=jnp.float32),
+        },
         "attn_layers": {0: {"wq": jnp.ones((8, 8), dtype=jnp.float32)}},
         "ff_layers": {0: {"out_proj": {"w": jnp.ones((32, 8), dtype=jnp.float32)}}},
         "head": {"proj1": {"w": jnp.ones((8, 1), dtype=jnp.float32)}},
@@ -232,7 +236,15 @@ def test_make_tx_transformer_payne_mup_depth_scales_attention_and_ff_by_depth():
 
 
 def test_make_tx_transformer_payne_mup_uses_model_config_defaults():
-    params = {"head": {"proj1": {"w": jnp.ones((8, 1), dtype=jnp.float32)}}}
+    params = {
+        "param_embedding": {
+            "w0": jnp.ones((2, 8), dtype=jnp.float32),
+            "w1": jnp.ones((8, 16), dtype=jnp.float32),
+        },
+        "attn_layers": {0: {"wq": jnp.ones((8, 8), dtype=jnp.float32)}},
+        "ff_layers": {0: {"in_proj": {"w": jnp.ones((8, 32), dtype=jnp.float32)}}},
+        "head": {"proj1": {"w": jnp.ones((8, 1), dtype=jnp.float32)}},
+    }
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
     cfg = RootConfig(
         model=ModelSpec(name="transformer_payne", params={"reference_width": 64}),

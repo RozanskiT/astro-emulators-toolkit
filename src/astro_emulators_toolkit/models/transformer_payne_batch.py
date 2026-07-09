@@ -45,10 +45,13 @@ def _sample_random_wave(
     max_w: float,
     dtype: jnp.dtype,
 ) -> jax.Array:
-    wave = jax.random.uniform(
+    # Queries are intentionally left unsorted: jnp.interp does not require
+    # sorted query points, the model treats query wavelengths independently,
+    # and on CUDA a per-step sort lowers to a CUB custom call that can
+    # invalidate XLA GPU command-buffer capture on long runs.
+    return jax.random.uniform(
         rng, shape=(batch_size, n_wavelength), minval=min_w, maxval=max_w, dtype=dtype
     )
-    return jnp.sort(wave, axis=1)
 
 
 def _require_train_rng(*, rng: jax.Array | None, context_name: str) -> jax.Array:

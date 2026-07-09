@@ -39,11 +39,15 @@ def test_core_distribution_promotes_training_and_hub_to_base_and_exposes_viz_ext
     assert "optax>=0.2.5" in dependencies
     assert "orbax-checkpoint>=0.11.5" in dependencies
     assert "huggingface_hub>=1.0.0" in dependencies
+    # jax must pin its own jaxlib; an explicit jaxlib dependency can resolve a
+    # jaxlib/CUDA-plugin combination jax was not built against (GPU segfaults).
+    assert not any(dep.startswith("jaxlib") for dep in dependencies)
 
     optional_deps = pyproject["project"]["optional-dependencies"]
-    assert set(optional_deps) == {"blackjax", "viz"}
+    assert set(optional_deps) == {"blackjax", "viz", "cuda12"}
     assert optional_deps["blackjax"] == ["blackjax>=1.2.5"]
     assert optional_deps["viz"] == ["matplotlib>=3.9"]
+    assert optional_deps["cuda12"] == ["jax[cuda12]>=0.6.0"]
 
     dependency_groups = pyproject["dependency-groups"]
     assert "docs" not in dependency_groups

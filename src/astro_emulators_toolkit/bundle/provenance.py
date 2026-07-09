@@ -14,9 +14,18 @@ from .. import __version__
 
 
 def _safe_git_commit() -> str | None:
-    proc = subprocess.run(
-        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # git may be absent entirely (minimal containers, cluster images);
+        # provenance must never make save_bundle fail.
+        return None
     if proc.returncode != 0:
         return None
     commit = proc.stdout.strip()

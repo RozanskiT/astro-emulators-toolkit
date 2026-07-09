@@ -242,8 +242,21 @@ _BIAS_PARAM_NAMES = {
     "bias",
 }
 
+# Canonical wrappers (models/canonical_wrappers.py) store the trainable model
+# under this attribute, so param trees built through Emulator.from_config are
+# rooted at "core_model" rather than at the raw model's own modules.
+_WRAPPER_ROOT_KEYS = frozenset({"core_model"})
+
+
+def _strip_wrapper_prefix(path: tuple[Any, ...]) -> tuple[Any, ...]:
+    idx = 0
+    while idx < len(path) - 1 and str(path[idx]) in _WRAPPER_ROOT_KEYS:
+        idx += 1
+    return path[idx:]
+
 
 def _label_transformer_payne_param_path(path: tuple[Any, ...]) -> str:
+    path = _strip_wrapper_prefix(path)
     if not path:
         return "default"
     root = path[0]
@@ -285,6 +298,7 @@ def _label_transformer_payne_params(params: Any, path: tuple[Any, ...] = ()) -> 
 
 
 def _label_mlp_param_path(path: tuple[Any, ...]) -> str:
+    path = _strip_wrapper_prefix(path)
     if not path:
         return "default"
     leaf = str(path[-1])
@@ -321,6 +335,37 @@ def _label_scaled_params(cfg, params: Any) -> Any:
     )
 
 
+def _collect_label_counts(labels: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                _walk(value)
+        else:
+            counts[str(node)] = counts.get(str(node), 0) + 1
+
+    _walk(labels)
+    return counts
+
+
+def _validate_scaled_labels(cfg, factors: Mapping[str, float], labels: Any) -> None:
+    counts = _collect_label_counts(labels)
+    required = set(factors) - {"bias", "default"}
+    missing = sorted(name for name in required if counts.get(name, 0) == 0)
+    if missing:
+        raise ValueError(
+            f"optim.lr_scaling={cfg.optim.lr_scaling!r} for model "
+            f"'{cfg.model.name}' matched no parameters for LR groups {missing} "
+            f"(observed label counts: {counts}). The parameter tree layout is "
+            "not recognized by the LR-group labeler, so scaled learning rates "
+            "would silently not be applied."
+        )
+
+
 def make_tx(cfg, params: Any | None = None) -> optax.GradientTransformation:
     lr = make_learning_rate(cfg)
 
@@ -338,6 +383,7 @@ def make_tx(cfg, params: Any | None = None) -> optax.GradientTransformation:
         for label, factor in factors.items()
     }
     labels = _label_scaled_params(cfg, params)
+    _validate_scaled_labels(cfg, factors, labels)
     return _with_grad_clip(cfg, optax.multi_transform(transforms, labels))
 
 
