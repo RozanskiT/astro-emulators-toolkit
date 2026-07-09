@@ -696,13 +696,38 @@ cfg = load_config("runs/demo/config.yaml")
 
 Prototype model families and tasks live under `experimental/...`. They are useful for research and development but are intentionally outside the stable public contract.
 
-### Transformer-specific note
+### Transformer-specific notes
 
 `transformer_payne` examples keep the wavelength interpolation/encoding path in float64 until the final embedding cast. For those workflows, enable:
 
 ```bash
 export JAX_ENABLE_X64=1
 ```
+
+**Wavelength coordinate convention.** The model is coordinate-agnostic: it
+never assumes Angstroms, nanometers, or log wavelengths. What matters is how
+the coordinate relates to the frequency-encoding periods:
+
+- prefer an affine-scaled coordinate whose **span is of order 1.0** (for
+  example `log10(wavelength)` or a min-max scaled coordinate), because the
+  library favors explicit affine scaling;
+- choose `max_period` at least as large as the coordinate span, so the
+  encoding has a component smoother than the sampled interval;
+- choose `min_period` around `span / R_max` for the highest resolution of
+  interest — spectral resolutions up to ~1e6 mean periods down to ~1e-6 of
+  the span.
+
+`make_device_batch_transform(...)` warns when the wavelength grid and the
+configured periods are inconsistent with this convention (span larger than
+`max_period`, or `min_period` far coarser than the finest grid spacing).
+
+**Validation protocol.** By default, evaluation broadcasts one shared
+`eval_wavelength_grid` to every spectrum. For parity with per-example
+random-wavelength validation protocols, pass `eval_mode="passthrough"` to
+`make_device_batch_transform(...)`: eval batches are then used exactly as the
+validation dataset provides them (precomputed per-example query wavelengths
+and matching targets), while training batches are still transformed with
+random wavelength sampling.
 
 See [`examples/basic/07_train_transformer_payne_flux.py`](examples/basic/07_train_transformer_payne_flux.py) and [`examples/advanced/03_train_transformer_payne_intensity.py`](examples/advanced/03_train_transformer_payne_intensity.py).
 
@@ -1058,6 +1083,27 @@ Common metadata fields exposed on load include:
 - `release` identity if the bundle has been prepared as a release;
 - `provenance` such as toolkit version, Python version, creation time, and git commit;
 - optional `fingerprint_evaluation` descriptors.
+
+## Bundle compatibility and versioning
+
+Bundles are meant to outlive toolkit versions. The compatibility contract is
+defined in one place — `src/astro_emulators_toolkit/bundle/versions.py` — and
+works as follows:
+
+- Four version fields identify a bundle: `bundle_format_version` (on-disk
+  layout and metadata envelope), `config_schema_version` (saved
+  `config.json` schema), `spec.spec_version` (I/O spec block semantics), and
+  `weights_layout` (the parameter-tree contract inside the safetensors file,
+  including the canonical-wrapper `core_model` nesting).
+- Saving stamps the current versions; loading accepts every version listed
+  in the `SUPPORTED_*` collections and rejects anything else with an error
+  that names the supported versions.
+- Older-but-supported bundle formats are upgraded **in memory** at load time
+  through the migration registry (`BUNDLE_METADATA_MIGRATIONS`); the on-disk
+  bundle is never modified by loading.
+- Every version bump must either extend the supported window with a
+  registered migration or be an explicit, CHANGELOG-documented hard break.
+  Dropping a version from a supported window is itself a breaking change.
 
 ## Bundles versus internal training state
 

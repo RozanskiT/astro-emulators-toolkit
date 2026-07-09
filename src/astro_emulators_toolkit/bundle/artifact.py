@@ -141,8 +141,13 @@ def save_bundle_artifact(
 
 
 def load_bundle_artifact(dirpath: str | Path):
+    from .versions import migrate_bundle_metadata
+
     bundle_dir = Path(dirpath)
     loaded = Bundle.load(bundle_dir)
+    # Upgrade supported older formats in memory before header validation;
+    # never mutates the on-disk bundle. See bundle/versions.py for the policy.
+    loaded.metadata = migrate_bundle_metadata(loaded.metadata)
     validate_bundle_header(loaded.metadata)
     manifest = verify_bundle_integrity(bundle_dir)
     loaded.metadata["bundle_id"] = manifest["bundle_id"]

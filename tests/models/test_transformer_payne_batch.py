@@ -25,6 +25,117 @@ from astro_emulators_toolkit.models.transformer_payne_batch import (
 jax.config.update("jax_enable_x64", True)
 
 
+def test_flux_transform_passthrough_eval_returns_batch_unchanged():
+    wave = np.linspace(0.0, 1.0, 32)
+    transform = TransformerPayneFluxDeviceBatchTransform(
+        wavelength_grid=wave,
+        n_wavelength=8,
+        eval_mode="passthrough",
+    )
+    params = np.zeros((2, 3), dtype=np.float64)
+
+    # Validation batches carry precomputed per-example query wavelengths and
+    # matching targets (the original per-example random-wavelength protocol).
+    query = np.sort(np.random.default_rng(0).uniform(0.0, 1.0, size=(2, 8)))
+    eval_batch = {"x": (params, query), "y": np.ones((2, 8), dtype=np.float64)}
+
+    out = transform(eval_batch, train=False)
+    assert out["x"] is eval_batch["x"]
+    assert out["y"] is eval_batch["y"]
+
+    # for_init follows the eval path, so initialization uses the dataset's
+    # explicit wavelengths too.
+    init = transform.for_init(eval_batch)
+    assert init["x"] is eval_batch["x"]
+
+    # Training batches carry full source spectra; the transform still samples
+    # random query wavelengths and interpolates.
+    train_batch = {
+        "x": (params, np.zeros((2, 8), dtype=np.float64)),
+        "y": np.ones((2, wave.shape[0]), dtype=np.float64),
+    }
+    trained = transform(train_batch, train=True, rng=jax.random.PRNGKey(0))
+    assert trained["x"] is not train_batch["x"]
+    assert np.asarray(trained["x"][1]).shape == (2, 8)
+    assert np.asarray(trained["y"]).shape == (2, 8)
+
+
+def test_flux_transform_passthrough_allows_missing_eval_grid():
+    wave = np.linspace(0.0, 1.0, 32)
+    # n_wavelength != len(wavelength_grid) requires an eval grid in "grid"
+    # mode but not in "passthrough" mode.
+    with pytest.raises(ValueError, match="Evaluation wavelength grid"):
+        TransformerPayneFluxDeviceBatchTransform(
+            wavelength_grid=wave, n_wavelength=8
+        )
+    TransformerPayneFluxDeviceBatchTransform(
+        wavelength_grid=wave, n_wavelength=8, eval_mode="passthrough"
+    )
+
+
+def test_flux_transform_rejects_unknown_eval_mode():
+    wave = np.linspace(0.0, 1.0, 8)
+    with pytest.raises(ValueError, match="eval_mode"):
+        TransformerPayneFluxDeviceBatchTransform(
+            wavelength_grid=wave, n_wavelength=8, eval_mode="random"
+        )
+
+
+def test_frequency_encoding_span_mismatch_warns_for_raw_angstrom_grid():
+    import warnings as _warnings
+
+    from astro_emulators_toolkit.config import ModelSpec, RootConfig
+    from astro_emulators_toolkit.models.runtime_adapters import (
+        _warn_on_frequency_encoding_span_mismatch,
+    )
+
+    cfg = RootConfig(
+        model=ModelSpec(
+            name="transformer_payne",
+            params={"min_period": 3e-2, "max_period": 30.0},
+        )
+    )
+
+    # Raw Angstrom coordinate: span 6000 >> max_period 30.
+    with pytest.warns(UserWarning, match="span"):
+        _warn_on_frequency_encoding_span_mismatch(
+            cfg, wavelength_arrays=(np.linspace(3000.0, 9000.0, 200),)
+        )
+
+    # log10-lambda-like coordinate with matched periods: no warning.
+    log_cfg = RootConfig(
+        model=ModelSpec(
+            name="transformer_payne",
+            params={"min_period": 1e-6, "max_period": 10.0},
+        )
+    )
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error")
+        _warn_on_frequency_encoding_span_mismatch(
+            log_cfg, wavelength_arrays=(np.linspace(3.477, 3.954, 1000),)
+        )
+
+
+def test_frequency_encoding_min_period_warning_for_coarse_encoding():
+    from astro_emulators_toolkit.config import ModelSpec, RootConfig
+    from astro_emulators_toolkit.models.runtime_adapters import (
+        _warn_on_frequency_encoding_span_mismatch,
+    )
+
+    cfg = RootConfig(
+        model=ModelSpec(
+            name="transformer_payne",
+            params={"min_period": 0.5, "max_period": 30.0},
+        )
+    )
+    # Grid spacing ~0.005 with min_period 0.5: encoding cannot resolve
+    # grid-scale structure.
+    with pytest.warns(UserWarning, match="min_period"):
+        _warn_on_frequency_encoding_span_mismatch(
+            cfg, wavelength_arrays=(np.linspace(0.0, 1.0, 200),)
+        )
+
+
 def test_sample_random_wave_is_unsorted_raw_uniform_stream():
     # Pin the no-sort contract: sorting was removed because it is unnecessary
     # (jnp.interp accepts unsorted queries; the model treats query wavelengths

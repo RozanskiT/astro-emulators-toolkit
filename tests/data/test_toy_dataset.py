@@ -332,11 +332,18 @@ def test_intensity_batch_transform_is_linear_in_each_channel():
 
 
 def test_intensity_batch_transform_requires_eval_wavelength_grid():
-    with pytest.raises(TypeError):
+    common_waves = {
+        "lines": np.linspace(0.0, 1.0, 5, dtype=np.float32),
+        "continuum": np.linspace(0.0, 1.0, 6, dtype=np.float32),
+    }
+    with pytest.raises(ValueError, match="eval_mode='passthrough'"):
         make_intensity_batch_transform(
-            common_waves={
-                "lines": np.linspace(0.0, 1.0, 5, dtype=np.float32),
-                "continuum": np.linspace(0.0, 1.0, 6, dtype=np.float32),
-            },
+            common_waves=common_waves,
             n_wavelength=5,
         )
+    # passthrough eval mode does not need a shared eval grid
+    make_intensity_batch_transform(
+        common_waves=common_waves,
+        n_wavelength=5,
+        eval_mode="passthrough",
+    )

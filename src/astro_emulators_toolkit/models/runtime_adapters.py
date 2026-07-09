@@ -21,6 +21,61 @@ from .canonical_wrappers import (
 from .transformer_payne import derive_transformer_payne_channel_semantics
 
 
+def _warn_on_frequency_encoding_span_mismatch(cfg, *, wavelength_arrays) -> None:
+    """Coordinate-agnostic sanity check for the wavelength frequency encoding.
+
+    The transformer is unit-agnostic, but its frequency encoding only covers
+    structure at scales between ``min_period`` and ``max_period`` in whatever
+    coordinate the wavelengths are expressed in. The recommended convention is
+    an affine-scaled coordinate whose span is of order 1.0, with
+    ``max_period >= span`` (a component smoother than the sampled interval)
+    and ``min_period ~ span / R_max`` for the highest resolution of interest
+    (R up to ~1e6 means periods down to ~1e-6 of the span).
+    """
+    import warnings
+
+    import numpy as np
+
+    from .transformer_payne import TransformerPayneConfig
+
+    try:
+        model_cfg = TransformerPayneConfig.from_dict(dict(cfg.model.params))
+    except Exception:
+        return
+    min_period = float(model_cfg.min_period)
+    max_period = float(model_cfg.max_period)
+
+    for wave in wavelength_arrays:
+        if wave is None:
+            continue
+        arr = np.asarray(wave, dtype=np.float64)
+        if arr.ndim != 1 or arr.size < 2:
+            continue
+        span = float(arr[-1] - arr[0])
+        finest_spacing = float(np.min(np.diff(arr)))
+        if span > max_period:
+            warnings.warn(
+                "The wavelength coordinate span "
+                f"({span:.6g}) exceeds the transformer's max_period "
+                f"({max_period:.6g}), so the frequency encoding has no "
+                "component smoother than the sampled interval. Affine-rescale "
+                "the wavelength coordinate so its span is of order 1.0 (for "
+                "example log10(wavelength) or a min-max scaled coordinate) "
+                "and/or choose max_period >= the coordinate span.",
+                stacklevel=3,
+            )
+        if finest_spacing > 0.0 and min_period > 10.0 * finest_spacing:
+            warnings.warn(
+                "The transformer's min_period "
+                f"({min_period:.6g}) is much larger than the finest wavelength "
+                f"grid spacing ({finest_spacing:.6g}), so the frequency "
+                "encoding cannot resolve structure at the grid scale. Choose "
+                "min_period ~ span / R_max for the highest resolution of "
+                "interest.",
+                stacklevel=3,
+            )
+
+
 class RuntimeAdapter(Protocol):
     """Stable-family extension seam used by resolver/spec/runtime/bundle dispatch."""
 
@@ -790,6 +845,16 @@ class TransformerPayneRuntimeAdapter:
         kwargs.setdefault("wavelength_role_path", role_paths["wavelength_leaf"])
         kwargs.setdefault("output_role_path", role_paths["output_leaf"])
         kwargs.setdefault("wavelength_dtype", "float64")
+        if mode == "intensity" or channels > 1:
+            common_waves = kwargs.get("common_waves")
+            wave_arrays = (
+                tuple(common_waves.values())
+                if isinstance(common_waves, Mapping)
+                else ()
+            )
+        else:
+            wave_arrays = (kwargs.get("wavelength_grid"),)
+        _warn_on_frequency_encoding_span_mismatch(cfg, wavelength_arrays=wave_arrays)
         if mode == "intensity" or channels > 1:
             output_channel_names = _metadata_leaf_for_role(
                 spec,

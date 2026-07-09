@@ -73,6 +73,22 @@ def _spectral_resolution_kernel(
         2.0 * np.sqrt(2.0 * np.log(2.0)) * resolution_value * np.log(10.0)
     )
     half_width = max(1, int(window_size_value * sigma_log / delta_log + 1.0))
+    n_pixels = int(np.asarray(log_wavelength).shape[0])
+    # The zero-padded "same" convolution biases flux low within half_width
+    # pixels of each spectrum edge. That is inherent to finite spectra; warn
+    # when the biased region is a substantial fraction of the whole spectrum.
+    if 2 * half_width > 0.2 * n_pixels:
+        import warnings
+
+        warnings.warn(
+            f"Spectral-resolution kernel half-width ({half_width} pixels) is "
+            f"large compared to the spectrum length ({n_pixels} pixels): "
+            f"~{200.0 * half_width / n_pixels:.0f}% of pixels lie in the "
+            "edge-biased region of the zero-padded convolution. Results near "
+            "the spectrum edges will be biased low; consider a wider "
+            "wavelength range or a higher target resolution.",
+            stacklevel=3,
+        )
     offsets = jnp.arange(-half_width, half_width + 1, dtype=jnp.float32)
     x = offsets * jnp.asarray(delta_log, dtype=jnp.float32)
     sigma = jnp.asarray(sigma_log, dtype=jnp.float32)
