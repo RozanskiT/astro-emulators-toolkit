@@ -18,16 +18,15 @@ def checkpoints_dir(workdir: str | Path) -> Path:
     return Path(workdir) / "checkpoints"
 
 
-def create_manager(workdir: str | Path, *, cfg: RootConfig):
+def best_checkpoints_dir(workdir: str | Path) -> Path:
+    return Path(workdir) / "checkpoints_best"
+
+
+def _make_manager(ckpt_dir: Path, *, cfg: RootConfig, max_to_keep: int | None):
     ocp = _require_orbax()
-    ckpt_dir = checkpoints_dir(workdir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     options = ocp.CheckpointManagerOptions(
-        max_to_keep=(
-            None
-            if cfg.training.max_saved_checkpoints is None
-            else int(cfg.training.max_saved_checkpoints)
-        ),
+        max_to_keep=max_to_keep,
         create=True,
         enable_async_checkpointing=bool(cfg.training.async_checkpointing),
     )
@@ -36,6 +35,23 @@ def create_manager(workdir: str | Path, *, cfg: RootConfig):
         "schema_version": int(cfg.schema_version),
     }
     return ocp.CheckpointManager(ckpt_dir, options=options, metadata=metadata)
+
+
+def create_manager(workdir: str | Path, *, cfg: RootConfig):
+    return _make_manager(
+        checkpoints_dir(workdir),
+        cfg=cfg,
+        max_to_keep=(
+            None
+            if cfg.training.max_saved_checkpoints is None
+            else int(cfg.training.max_saved_checkpoints)
+        ),
+    )
+
+
+def create_best_manager(workdir: str | Path, *, cfg: RootConfig):
+    """Manager for the single best checkpoint, kept apart from resume state."""
+    return _make_manager(best_checkpoints_dir(workdir), cfg=cfg, max_to_keep=1)
 
 
 def save(

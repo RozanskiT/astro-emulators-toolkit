@@ -558,6 +558,43 @@ class Emulator:
             train_state_cls=TrainState,
         )
 
+    def load_best_checkpoint(self) -> "Emulator":
+        """Restore the best-metric checkpoint written during :meth:`fit`.
+
+        Requires ``training.checkpoint_best_metric`` to have been set (or a
+        ``BestModelCheckpoint`` callback passed) during training, so a best
+        checkpoint exists under ``checkpoints_best/`` in the workdir. The
+        emulator's parameters and model state are replaced with the best
+        snapshot; a typical flow is ``fit(...)``, ``load_best_checkpoint()``,
+        ``save_bundle(...)``.
+        """
+        from .training import checkpoint as ckpt_module
+
+        if self.graphdef is None or self.params is None:
+            raise RuntimeError(
+                "Emulator is not initialized; call fit(...) with best-model "
+                "checkpointing enabled before load_best_checkpoint()."
+            )
+        if self.tx is None:
+            self.tx = make_tx(self.cfg, params=self.params)
+        workdir = Path(self.cfg.training.workdir).resolve()
+        mngr = ckpt_module.create_best_manager(workdir, cfg=self.cfg)
+        try:
+            restored = ckpt_module.restore_latest(mngr, target=self._init_train_state())
+        finally:
+            mngr.wait_until_finished()
+            mngr.close()
+        if restored is None:
+            raise FileNotFoundError(
+                "No best checkpoint found under "
+                f"'{ckpt_module.best_checkpoints_dir(workdir)}'. Enable it with "
+                "training.checkpoint_best_metric (or a BestModelCheckpoint "
+                "callback) and run fit(...) with a validation dataset."
+            )
+        self.params = restored.params
+        self.model_state = restored.model_state
+        return self
+
     def _lazy_initialize_from_dataset(
         self,
         dataset,

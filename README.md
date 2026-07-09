@@ -427,6 +427,12 @@ print(bundle_dir)
   choices — resolved solver, optimizer source (config vs
   `configure_training` override), optim settings, toolkit version — to
   `effective_runs.jsonl`.
+- Best-model tracking: set `training.checkpoint_best_metric` (e.g. `"loss"`,
+  with `checkpoint_best_mode` `"min"`/`"max"`) and the single best
+  `TrainState` — judged on validation metrics — is kept under
+  `checkpoints_best/` in the workdir, separate from the resume checkpoints.
+  After training, `emu.load_best_checkpoint()` restores it; a typical flow is
+  `fit(...)` → `load_best_checkpoint()` → `save_bundle(...)`.
 - Resuming continues the LR schedule from the restored optimizer step. A
   resume with a changed optimizer/schedule config (including a different
   `training.num_steps`, which reshapes cosine decay) emits a warning based on

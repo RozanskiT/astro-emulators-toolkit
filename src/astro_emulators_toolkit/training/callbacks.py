@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from numbers import Integral
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TextIO
+from typing import TYPE_CHECKING, Any, Literal, TextIO, cast
 
 if TYPE_CHECKING:
     from ..config.schema import RootConfig
@@ -357,6 +357,31 @@ class ModelCheckpoint(Callback):
         return False
 
 
+class BestModelCheckpoint(Callback):
+    """Track a validation metric and keep the single best checkpoint.
+
+    The best ``TrainState`` is written to ``checkpoints_best/`` in the
+    workdir, separate from the resume checkpoints, whenever ``monitor``
+    improves at an evaluation step. Restore it after training with
+    ``Emulator.load_best_checkpoint()``.
+    """
+
+    def __init__(self, monitor: str = "loss", mode: Literal["min", "max"] = "min"):
+        monitor = str(monitor).strip()
+        if not monitor:
+            raise ValueError("BestModelCheckpoint monitor must be a non-empty string.")
+        if mode not in {"min", "max"}:
+            raise ValueError("BestModelCheckpoint mode must be 'min' or 'max'.")
+        self.monitor = monitor
+        self.mode = mode
+
+    def is_improvement(self, value: float, best: float | None) -> bool:
+        """Return True when ``value`` beats the best value seen so far."""
+        if best is None:
+            return True
+        return value < best if self.mode == "min" else value > best
+
+
 def build_callbacks_from_config(cfg: "RootConfig") -> list[Callback]:
     """Build default progress and checkpoint callbacks from a root config."""
     callbacks: list[Callback] = []
@@ -377,6 +402,13 @@ def build_callbacks_from_config(cfg: "RootConfig") -> list[Callback]:
             ModelCheckpoint(
                 every_n_steps=cfg.training.checkpoint_interval_steps,
                 explicit_steps=cfg.training.checkpoint_steps,
+            )
+        )
+    if cfg.training.checkpoint_best_metric is not None:
+        callbacks.append(
+            BestModelCheckpoint(
+                monitor=cfg.training.checkpoint_best_metric,
+                mode=cast('Literal["min", "max"]', cfg.training.checkpoint_best_mode),
             )
         )
     return callbacks

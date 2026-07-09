@@ -451,6 +451,12 @@ class TrainConfig:
     checkpoint_steps: tuple[int, ...] | None = None
     # None means preserve all saved checkpoints
     max_saved_checkpoints: int | None = 5
+    # Validation metric name to track for best-model checkpointing (e.g.
+    # "loss"). When set, the single best TrainState is kept under
+    # checkpoints_best/ in the workdir, separate from the resume checkpoints;
+    # restore it with Emulator.load_best_checkpoint(). None disables tracking.
+    checkpoint_best_metric: str | None = None
+    checkpoint_best_mode: str = "min"  # "min" | "max"
     # set False to force synchronous checkpoint writes (useful when bisecting
     # GPU instability, at the cost of blocking the training loop per save)
     async_checkpointing: bool = True
@@ -469,6 +475,21 @@ class TrainConfig:
         if num_steps < 0:
             raise ValueError("training.num_steps must be >= 0.")
         object.__setattr__(self, "num_steps", num_steps)
+
+        if self.checkpoint_best_metric is not None:
+            metric = str(self.checkpoint_best_metric).strip()
+            if not metric:
+                raise ValueError(
+                    "training.checkpoint_best_metric must be a non-empty "
+                    "string or None."
+                )
+            object.__setattr__(self, "checkpoint_best_metric", metric)
+        mode = str(self.checkpoint_best_mode).strip().lower()
+        if mode not in {"min", "max"}:
+            raise ValueError(
+                "training.checkpoint_best_mode must be 'min' or 'max'."
+            )
+        object.__setattr__(self, "checkpoint_best_mode", mode)
 
         val_fraction = _normalize_finite_float(
             self.val_fraction,

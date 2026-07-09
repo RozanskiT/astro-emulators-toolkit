@@ -1,5 +1,6 @@
 from .state import TrainState
 from .callbacks import (
+    BestModelCheckpoint,
     Callback,
     History,
     CSVLogger,
@@ -16,6 +17,7 @@ __all__ = [
     "CSVLogger",
     "ProgressBarLogger",
     "ModelCheckpoint",
+    "BestModelCheckpoint",
     "build_callbacks_from_config",
 ]
 

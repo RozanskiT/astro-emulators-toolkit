@@ -23,7 +23,13 @@ from ..data.protocols import (
 )
 from ..utils.tree import logs_device_to_python, to_jax_tree
 from ..training.state import TrainState
-from .callbacks import Callback, History, ModelCheckpoint, _HistoryCallback
+from .callbacks import (
+    BestModelCheckpoint,
+    Callback,
+    History,
+    ModelCheckpoint,
+    _HistoryCallback,
+)
 from .paths import RUN_CONFIG_FILENAME
 
 
@@ -55,6 +61,11 @@ class _CheckpointProxy:
         from ..training import checkpoint as ckpt_module
 
         return ckpt_module.latest_custom_metadata(*args, **kwargs)
+
+    def create_best_manager(self, *args, **kwargs):
+        from ..training import checkpoint as ckpt_module
+
+        return ckpt_module.create_best_manager(*args, **kwargs)
 
 
 ckpt = _CheckpointProxy()
@@ -206,6 +217,23 @@ def fit(
     model_checkpoint_callbacks = [c for c in cb if isinstance(c, ModelCheckpoint)]
     log_callbacks = [c for c in cb if not isinstance(c, ModelCheckpoint)]
 
+    best_checkpoint_callbacks = [c for c in cb if isinstance(c, BestModelCheckpoint)]
+    if len(best_checkpoint_callbacks) > 1:
+        raise ValueError(
+            "At most one BestModelCheckpoint callback is supported per fit."
+        )
+    best_cb = best_checkpoint_callbacks[0] if best_checkpoint_callbacks else None
+    best_mngr = None
+    best_value: float | None = None
+    if best_cb is not None and val_dataset is not None:
+        best_mngr = ckpt.create_best_manager(workdir, cfg=cfg)
+        if resume:
+            best_meta = ckpt.latest_custom_metadata(best_mngr) or {}
+            if best_meta.get("monitor") == best_cb.monitor:
+                previous_best = best_meta.get("best_value")
+                if isinstance(previous_best, (int, float)):
+                    best_value = float(previous_best)
+
     mngr = None
     if resume or model_checkpoint_callbacks:
         mngr = ckpt.create_manager(workdir, cfg=cfg)
@@ -337,6 +365,7 @@ def fit(
     )
     completed_steps = host_step
     pending_train: tuple[int, dict[str, Any]] | None = None
+    best_monitor_missing_warned = False
 
     def _flush_pending_train(step: int, logs: dict[str, Any]) -> None:
         if not should_emit_train_logs(step):
@@ -420,6 +449,34 @@ def fit(
                     for c in cb:
                         c.on_eval_end(host_step, agg)
 
+                    if best_mngr is not None and best_cb is not None:
+                        monitored = agg.get(best_cb.monitor)
+                        if monitored is None:
+                            if not best_monitor_missing_warned:
+                                best_monitor_missing_warned = True
+                                warnings.warn(
+                                    "BestModelCheckpoint monitor "
+                                    f"'{best_cb.monitor}' is not among the "
+                                    f"evaluation metrics {sorted(agg)}; no "
+                                    "best checkpoint will be tracked.",
+                                    stacklevel=2,
+                                )
+                        elif best_cb.is_improvement(float(monitored), best_value):
+                            best_value = float(monitored)
+                            best_path = ckpt.save(
+                                best_mngr,
+                                host_step,
+                                state,
+                                custom_metadata={
+                                    "step": int(host_step),
+                                    "monitor": best_cb.monitor,
+                                    "best_value": best_value,
+                                    "optimizer_fingerprint": optimizer_fingerprint,
+                                },
+                            )
+                            if best_path is not None:
+                                _dispatch_checkpoint_end(host_step, best_path)
+
                 completed_steps += 1
 
             if pending_train is not None:
@@ -449,10 +506,13 @@ def fit(
                     if path is not None:
                         _dispatch_checkpoint_end(final_step, path)
     finally:
-        # Runs on success and on exceptions: an in-flight async save is
-        # awaited and the manager is released either way.
+        # Runs on success and on exceptions: in-flight async saves are
+        # awaited and the managers are released either way.
         if mngr is not None:
             mngr.wait_until_finished()
             mngr.close()
+        if best_mngr is not None:
+            best_mngr.wait_until_finished()
+            best_mngr.close()
 
     return FitResult(history=history, state=state)
