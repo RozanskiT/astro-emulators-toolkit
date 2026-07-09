@@ -87,8 +87,10 @@ class NpyTableDataset:
             # structured
             stacked = np.stack([self.arr[name][idx] for name in cols], axis=1)
             return stacked.astype(self.dtype, copy=False)
-        # 2D
-        selected = self.arr[idx][:, list(cols)]
+        # 2D: index rows and columns together so a memory-mapped table only
+        # reads the touched columns — self.arr[idx] would materialize entire
+        # rows (all columns) first, which is prohibitive for wide spectra.
+        selected = self.arr[np.ix_(np.asarray(idx), np.asarray(list(cols)))]
         return np.asarray(selected, dtype=self.dtype)
 
     def get_batch(self, idx: np.ndarray) -> dict[str, Any]:

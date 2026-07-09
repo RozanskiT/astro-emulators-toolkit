@@ -41,7 +41,12 @@ class Callback:
         ...
 
     def on_checkpoint_end(self, step: int, path: str):
-        """Called after trainer-managed checkpoint saving completes."""
+        """Called on every callback after a checkpoint save is accepted.
+
+        With asynchronous checkpointing (the default) the write may still be
+        in flight when this fires; the path identifies where the checkpoint
+        will materialize.
+        """
         ...
 
 

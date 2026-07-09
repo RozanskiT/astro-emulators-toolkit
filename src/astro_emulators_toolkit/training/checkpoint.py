@@ -40,16 +40,23 @@ def create_manager(workdir: str | Path, *, cfg: RootConfig):
 
 def save(
     mngr, step: int, train_state, *, custom_metadata: dict[str, Any] | None = None
-) -> str:
+) -> str | None:
+    """Request a checkpoint save; return the step path, or None if declined.
+
+    Orbax declines saves it considers redundant (e.g. a step at or before the
+    latest saved step). Saves may complete asynchronously after this returns.
+    """
     ocp = _require_orbax()
     state_for_save = train_state.replace(
         rng_key=jax.random.key_data(train_state.rng_key)
     )
-    mngr.save(
+    saved = mngr.save(
         int(step),
         args=ocp.args.StandardSave(state_for_save),
         custom_metadata=custom_metadata,
     )
+    if saved is False:
+        return None
     return str(mngr.directory / str(step))
 
 

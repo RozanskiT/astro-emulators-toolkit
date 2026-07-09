@@ -321,6 +321,10 @@ def fit(
         interval_steps=cfg.training.evaluation_interval_steps,
         explicit_steps=cfg.training.evaluation_steps,
     )
+    evaluation_enabled = (
+        cfg.training.evaluation_interval_steps is not None
+        or cfg.training.evaluation_steps is not None
+    )
     if max_steps is not None and int(max_steps) <= 0:
         raise ValueError("max_steps must be > 0 when provided.")
 
@@ -341,100 +345,116 @@ def fit(
         for callback in log_callbacks:
             callback.on_train_batch_end(step, logs_python)
 
-    while completed_steps < effective_target_steps:
-        epoch = completed_steps // steps_per_epoch
-        for c in cb:
-            c.on_epoch_begin(epoch, {})
+    def _dispatch_checkpoint_end(step: int, path: str) -> None:
+        for listener in cb:
+            listener.on_checkpoint_end(step, path)
 
-        epoch_end = min((epoch + 1) * steps_per_epoch, effective_target_steps)
-        while completed_steps < epoch_end:
-            batch = _to_jax_batch(train_loader.train_batch(completed_steps))
-            state, logs = train_step(state, batch)
-            host_step += 1
-            if should_emit_train_logs(host_step):
-                logs = _maybe_copy_to_host_async(logs)
-            if host_step % _BACKPRESSURE_SYNC_INTERVAL_STEPS == 0:
-                jax.block_until_ready(state.step)
+    try:
+        while completed_steps < effective_target_steps:
+            epoch = completed_steps // steps_per_epoch
+            for c in cb:
+                c.on_epoch_begin(epoch, {})
 
-            for c in model_checkpoint_callbacks:
-                if mngr is None or not c.should_save(host_step):
-                    continue
-                path = ckpt.save(
-                    mngr,
-                    host_step,
-                    state,
-                    custom_metadata={
-                        "step": int(host_step),
-                        "optimizer_fingerprint": optimizer_fingerprint,
-                    },
-                )
-                if path is not None:
-                    c.on_checkpoint_end(host_step, path)
+            epoch_end = min((epoch + 1) * steps_per_epoch, effective_target_steps)
+            while completed_steps < epoch_end:
+                batch = _to_jax_batch(train_loader.train_batch(completed_steps))
+                state, logs = train_step(state, batch)
+                host_step += 1
+                if should_emit_train_logs(host_step):
+                    logs = _maybe_copy_to_host_async(logs)
+                if host_step % _BACKPRESSURE_SYNC_INTERVAL_STEPS == 0:
+                    jax.block_until_ready(state.step)
+
+                for c in model_checkpoint_callbacks:
+                    if mngr is None or not c.should_save(host_step):
+                        continue
+                    path = ckpt.save(
+                        mngr,
+                        host_step,
+                        state,
+                        custom_metadata={
+                            "step": int(host_step),
+                            "optimizer_fingerprint": optimizer_fingerprint,
+                        },
+                    )
+                    if path is not None:
+                        _dispatch_checkpoint_end(host_step, path)
+
+                if pending_train is not None:
+                    prev_step, prev_logs = pending_train
+                    _flush_pending_train(prev_step, prev_logs)
+                pending_train = (host_step, logs)
+
+                # When evaluation is enabled, the final trained state always
+                # gets validation metrics, even when num_steps does not land
+                # on the evaluation cadence. Explicitly disabled evaluation
+                # (interval None, no explicit steps) stays disabled.
+                if val_loader is not None and (
+                    should_run_eval(host_step)
+                    or (evaluation_enabled and host_step == effective_target_steps)
+                ):
+                    if all(
+                        hasattr(task, n)
+                        for n in ("init_eval_state", "update_eval_state", "finalize_eval")
+                    ):
+                        eval_state = task.init_eval_state()
+                        for vb_np in val_loader.iter_eval_batches():
+                            vb = _to_jax_batch(vb_np)
+                            pred, vb = eval_predict(state, vb)
+                            eval_state = task.update_eval_state(eval_state, pred, vb)
+                        agg = logs_device_to_python(
+                            jax.device_get(task.finalize_eval(eval_state))
+                        )
+                    else:
+                        sums: dict[str, float] = {}
+                        denom = 0.0
+                        for vb_np in val_loader.iter_eval_batches():
+                            vb = _to_jax_batch(vb_np)
+                            pred, vb = eval_predict(state, vb)
+                            loss, metrics = task.loss_and_metrics(pred, vb)
+                            logs_eval = {"loss": loss, **metrics}
+                            w = float(np.asarray(vb_np["valid_mask"]).sum())
+                            denom += w
+                            h = logs_device_to_python(logs_eval)
+                            for k, v in h.items():
+                                sums[k] = sums.get(k, 0.0) + float(v) * w
+                        agg = {k: v / max(denom, 1e-12) for k, v in sums.items()}
+                    for c in cb:
+                        c.on_eval_end(host_step, agg)
+
+                completed_steps += 1
 
             if pending_train is not None:
                 prev_step, prev_logs = pending_train
                 _flush_pending_train(prev_step, prev_logs)
-            pending_train = (host_step, logs)
+                pending_train = None
 
-            if val_loader is not None and should_run_eval(host_step):
-                if all(
-                    hasattr(task, n)
-                    for n in ("init_eval_state", "update_eval_state", "finalize_eval")
-                ):
-                    eval_state = task.init_eval_state()
-                    for vb_np in val_loader.iter_eval_batches():
-                        vb = _to_jax_batch(vb_np)
-                        pred, vb = eval_predict(state, vb)
-                        eval_state = task.update_eval_state(eval_state, pred, vb)
-                    agg = logs_device_to_python(
-                        jax.device_get(task.finalize_eval(eval_state))
-                    )
-                else:
-                    sums: dict[str, float] = {}
-                    denom = 0.0
-                    for vb_np in val_loader.iter_eval_batches():
-                        vb = _to_jax_batch(vb_np)
-                        pred, vb = eval_predict(state, vb)
-                        loss, metrics = task.loss_and_metrics(pred, vb)
-                        logs_eval = {"loss": loss, **metrics}
-                        w = float(np.asarray(vb_np["valid_mask"]).sum())
-                        denom += w
-                        h = logs_device_to_python(logs_eval)
-                        for k, v in h.items():
-                            sums[k] = sums.get(k, 0.0) + float(v) * w
-                    agg = {k: v / max(denom, 1e-12) for k, v in sums.items()}
-                for c in cb:
-                    c.on_eval_end(host_step, agg)
+            for c in cb:
+                c.on_epoch_end(epoch, {})
 
-            completed_steps += 1
-
-        if pending_train is not None:
-            prev_step, prev_logs = pending_train
-            _flush_pending_train(prev_step, prev_logs)
-            pending_train = None
-
+        final_step = int(jax.device_get(state.step))
         for c in cb:
-            c.on_epoch_end(epoch, {})
+            c.on_train_end({"step": final_step})
 
-    final_step = int(jax.device_get(state.step))
-    for c in cb:
-        c.on_train_end({"step": final_step})
-
-    if mngr is not None:
-        for c in model_checkpoint_callbacks:
-            if c.save_on_train_end:
-                path = ckpt.save(
-                    mngr,
-                    final_step,
-                    state,
-                    custom_metadata={
-                        "step": int(final_step),
-                        "optimizer_fingerprint": optimizer_fingerprint,
-                    },
-                )
-                if path is not None:
-                    c.on_checkpoint_end(final_step, path)
-        mngr.wait_until_finished()
-        mngr.close()
+        if mngr is not None:
+            for c in model_checkpoint_callbacks:
+                if c.save_on_train_end:
+                    path = ckpt.save(
+                        mngr,
+                        final_step,
+                        state,
+                        custom_metadata={
+                            "step": int(final_step),
+                            "optimizer_fingerprint": optimizer_fingerprint,
+                        },
+                    )
+                    if path is not None:
+                        _dispatch_checkpoint_end(final_step, path)
+    finally:
+        # Runs on success and on exceptions: an in-flight async save is
+        # awaited and the manager is released either way.
+        if mngr is not None:
+            mngr.wait_until_finished()
+            mngr.close()
 
     return FitResult(history=history, state=state)

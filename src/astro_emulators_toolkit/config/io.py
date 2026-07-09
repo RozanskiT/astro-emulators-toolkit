@@ -110,6 +110,12 @@ def _coerce_value(value: Any, annotation: Any, *, field_name: str) -> Any:
         if value is None and type(None) in args:
             return None
         non_none_args = [arg for arg in args if arg is not type(None)]
+        # Exact-type members win before lossy coercions, so e.g. a column
+        # NAMED "12" stays a string under int | str instead of silently
+        # becoming column index 12.
+        for candidate in non_none_args:
+            if candidate in (int, float, str, bool) and type(value) is candidate:
+                return value
         for candidate in non_none_args:
             try:
                 return _coerce_value(value, candidate, field_name=field_name)
@@ -219,9 +225,12 @@ def load_config(path: str | Path) -> RootConfig:
     if _is_yaml_path(path):
         yaml = _import_yaml()
         raw = yaml.safe_load(path.read_text())
+        # Work around YAML 1.1 parsing unquoted "1e-4"-style floats as
+        # strings. JSON strings are explicitly quoted by the author and are
+        # never coerced.
+        raw = _normalize_loaded_tree(raw)
     else:
         raw = json.loads(path.read_text())
-    raw = _normalize_loaded_tree(raw)
 
     if not isinstance(raw, dict):
         raise ValueError("Configuration root must be a mapping.")

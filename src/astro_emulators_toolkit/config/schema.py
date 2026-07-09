@@ -281,6 +281,15 @@ class SolverConfig:
             if ridge < 0.0:
                 raise ValueError("solver.params.ridge must be >= 0.")
             params["ridge"] = ridge
+        if name == "gradient" and params:
+            # The gradient solver reads its settings from optim/training, not
+            # solver.params; silently accepting keys here hid typos and
+            # misplaced settings.
+            raise ValueError(
+                "solver.params is not used by the 'gradient' solver "
+                f"(got keys: {sorted(params)}). Gradient training is "
+                "configured through the 'optim' and 'training' sections."
+            )
         object.__setattr__(self, "params", params)
 
 

@@ -13,6 +13,7 @@ from ..models.canonical_wrappers import (
     CanonicalArrayModelWrapper,
     CanonicalTransformerModelWrapper,
 )
+from ..io_trees import set_leaf_by_path
 from ..models.runtime_adapters import (
     ArrayRuntimeAdapter,
     _batched_last_axis_size,
@@ -134,11 +135,6 @@ class ExplicitWavelengthMLPRuntimeAdapter:
     def materialize_spec(self, *, cfg, spec: dict[str, Any]) -> dict[str, Any]:
         out = deepcopy(spec)
         channels = int(dict(cfg.model.params).get("channels", 1))
-        output_channel_names_tree = None
-        if channels > 1:
-            output_channel_names_tree = {
-                self.default_output_leaf_key: [f"channel_{i}" for i in range(channels)]
-            }
         out["inputs"] = _merge_iotree_defaults(
             out.get("inputs"),
             default_structure_tree={
@@ -149,8 +145,21 @@ class ExplicitWavelengthMLPRuntimeAdapter:
         out["outputs"] = _merge_iotree_defaults(
             out.get("outputs"),
             default_structure_tree={self.default_output_leaf_key: None},
-            default_channel_names_tree=output_channel_names_tree,
         )
+        # Resolve the actual output leaf path before injecting default
+        # channel names: a user-supplied output structure may not use
+        # default_output_leaf_key, and hardcoding it crashed spec validation
+        # with a key the user never wrote.
+        if channels > 1 and out["outputs"].get("channel_names_tree") is None:
+            output_leaf_paths = _section_leaf_paths(out, "outputs")
+            if len(output_leaf_paths) == 1:
+                output_channel_names_tree: dict[str, Any] = {}
+                set_leaf_by_path(
+                    output_channel_names_tree,
+                    output_leaf_paths[0],
+                    [f"channel_{i}" for i in range(channels)],
+                )
+                out["outputs"]["channel_names_tree"] = output_channel_names_tree
         return out
 
     def derive_role_paths(self, *, cfg, spec: dict[str, Any]) -> dict[str, str]:
@@ -418,11 +427,6 @@ class MLP2DRegressionRuntimeAdapter(ArrayRuntimeAdapter):
     def materialize_spec(self, *, cfg, spec: dict[str, Any]) -> dict[str, Any]:
         out = deepcopy(spec)
         channels = int(dict(cfg.model.params).get("channels", 2))
-        output_channel_names_tree = None
-        if channels > 1:
-            output_channel_names_tree = {
-                self.default_output_leaf_key: [f"channel_{i}" for i in range(channels)]
-            }
         out["inputs"] = _merge_iotree_defaults(
             out.get("inputs"),
             default_structure_tree={self.default_input_leaf_key: None},
@@ -430,8 +434,19 @@ class MLP2DRegressionRuntimeAdapter(ArrayRuntimeAdapter):
         out["outputs"] = _merge_iotree_defaults(
             out.get("outputs"),
             default_structure_tree={self.default_output_leaf_key: None},
-            default_channel_names_tree=output_channel_names_tree,
         )
+        # Resolve the actual output leaf path before injecting default
+        # channel names (see ExplicitWavelengthMLPRuntimeAdapter).
+        if channels > 1 and out["outputs"].get("channel_names_tree") is None:
+            output_leaf_paths = _section_leaf_paths(out, "outputs")
+            if len(output_leaf_paths) == 1:
+                output_channel_names_tree: dict[str, Any] = {}
+                set_leaf_by_path(
+                    output_channel_names_tree,
+                    output_leaf_paths[0],
+                    [f"channel_{i}" for i in range(channels)],
+                )
+                out["outputs"]["channel_names_tree"] = output_channel_names_tree
         return out
 
 

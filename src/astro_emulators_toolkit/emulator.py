@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, cast
 
@@ -38,6 +39,17 @@ from .training.callbacks import History
 
 if TYPE_CHECKING:
     import optax
+
+
+# Third-party packages whose absence legitimately means "training extras are
+# not installed"; any other ImportError is a real bug and must propagate.
+_TRAINING_DEPENDENCY_ROOTS = frozenset({"optax", "orbax", "flax", "jax"})
+
+
+def _reraise_unless_missing_training_dependency(exc: ImportError) -> None:
+    root = (getattr(exc, "name", None) or "").split(".")[0]
+    if root not in _TRAINING_DEPENDENCY_ROOTS:
+        raise exc
 
 
 def resolve_solver(*args, **kwargs):
@@ -410,6 +422,7 @@ class Emulator:
         self.task: Any | None = None
         self.tx: optax.GradientTransformation | None = None
         self._optimizer_overridden = False
+        self._cfg_spec_cache: dict[str, Any] | None = None
         self.last_fit_method: str | None = None
         self.last_fit_metadata: dict[str, Any] | None = None
         self.bundle_metadata: dict[str, Any] | None = None
@@ -612,6 +625,7 @@ class Emulator:
                 task_params=dict(self.cfg.task.params),
             )
         except ImportError as exc:
+            _reraise_unless_missing_training_dependency(exc)
             raise RuntimeError(
                 "Required training dependencies are unavailable in this environment. "
                 "Reinstall `astro-emulators-toolkit` or verify that its core training packages import correctly."
@@ -627,6 +641,7 @@ class Emulator:
             try:
                 self.tx = make_tx(self.cfg, params=self.params)
             except ImportError as exc:
+                _reraise_unless_missing_training_dependency(exc)
                 raise RuntimeError(
                     "Required training dependencies are unavailable in this environment. "
                     "Reinstall `astro-emulators-toolkit` or verify that its core training packages import correctly."
@@ -774,6 +789,8 @@ class Emulator:
         if self._model_entry is not None and self._model_entry.runtime is not None:
             if not isinstance(x, dict):
                 raise ValueError("Public predict expects canonical dict-tree inputs.")
+            # apply_jax validates again, but with an "apply_jax inputs" error
+            # label; validating here keeps errors attributed to predict.
             _validate_public_batched_input_tree(x, field_name="predict inputs")
         y = self.apply_jax(x, postprocess=True, train=False)
         return to_numpy_pytree(y)
@@ -868,7 +885,11 @@ class Emulator:
     def spec(self) -> dict[str, Any]:
         """Resolved portability spec for the current emulator or loaded bundle."""
         if self.bundle_metadata is None:
-            return materialize_effective_spec(self.cfg)
+            # cfg is immutable after __init__, so the materialized spec is
+            # cached; a copy is returned so callers cannot mutate the cache.
+            if self._cfg_spec_cache is None:
+                self._cfg_spec_cache = materialize_effective_spec(self.cfg)
+            return deepcopy(self._cfg_spec_cache)
         if "spec" not in self.bundle_metadata:
             raise ValueError(
                 "Bundle metadata is missing required 'spec' entry. Re-save the bundle with current toolkit version."
