@@ -424,6 +424,11 @@ scientific validation.
 
 Supported settings are:
 
+- `transformer_payne` with `optim.lr_scaling="si"`: legacy standard
+  parameterization. Parameter-embedding groups train at
+  `lr * optim.scale_embedding_lr`; all other groups keep the base learning
+  rate. No reference width is required and, unlike `mup`, the output
+  embedding is not width-divided.
 - `mlp` with `optim.lr_scaling="mup"`: requires `model.params.reference_width`.
   Dense kernels are scaled by the ratio between the reference width and the
   current hidden width; biases and otherwise unclassified parameters keep the
@@ -435,9 +440,19 @@ Supported settings are:
   requires `model.params.reference_depth` and applies the depth factor to the
   attention and feed-forward blocks.
 
-`optim.scale_embedding_lr` is available for Transformer Payne parameter
-embedding layers. `optim.grad_clip=0.0`, the default, disables gradient clipping;
-set a positive value to clip by global norm before the optimizer update.
+`optim.scale_embedding_lr` scales the Transformer Payne parameter-embedding
+learning rate and is only meaningful with `lr_scaling` set to `"si"`, `"mup"`,
+or `"mup_depth"`; setting it with `lr_scaling=None` is a config error rather
+than a silently ignored knob. `optim.lr_scaling="standard"` is rejected as
+ambiguous — use `None` for one shared learning rate or `"si"` for the legacy
+standard parameterization. `optim.grad_clip=0.0`, the default, disables
+gradient clipping; set a positive value to clip by global norm before the
+optimizer update.
+
+Schedule endpoint convention: for `cosine` and `wsd`, every applied step uses
+a strictly positive learning rate. Warmup ramps `lr/warmup_steps, ...` up to
+`lr`, and decay reaches exactly zero only one step past the final applied
+optimizer step, so no training step is wasted on a zero learning rate.
 
 Representative examples:
 

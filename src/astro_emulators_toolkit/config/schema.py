@@ -290,7 +290,7 @@ class OptimConfig:
 
     name: str = "adamw"  # "adam" | "adamw" | "sgd" | "soap"
     lr: float = 1e-3
-    lr_scaling: str | None = None  # None | "mup" | "mup_depth"
+    lr_scaling: str | None = None  # None | "si" | "mup" | "mup_depth"
     scale_embedding_lr: float = 1.0
     schedule: str = "constant"  # "constant" | "cosine" | "wsd"
     warmup_steps: int = 0
@@ -319,11 +319,18 @@ class OptimConfig:
         lr_scaling = self.lr_scaling
         if lr_scaling is not None:
             lr_scaling = _normalize_registry_name(str(lr_scaling))
-            if lr_scaling in {"", "none", "standard", "si"}:
+            if lr_scaling in {"", "none"}:
                 lr_scaling = None
-            elif lr_scaling not in {"mup", "mup_depth"}:
+            elif lr_scaling == "standard":
                 raise ValueError(
-                    "optim.lr_scaling must be None, 'mup', or 'mup_depth'."
+                    "optim.lr_scaling='standard' is ambiguous. Use None for one "
+                    "shared learning rate, or 'si' for the legacy standard "
+                    "parameterization where embedding groups are scaled by "
+                    "optim.scale_embedding_lr."
+                )
+            elif lr_scaling not in {"si", "mup", "mup_depth"}:
+                raise ValueError(
+                    "optim.lr_scaling must be None, 'si', 'mup', or 'mup_depth'."
                 )
         object.__setattr__(self, "lr_scaling", lr_scaling)
 
@@ -332,6 +339,12 @@ class OptimConfig:
         )
         if scale_embedding_lr < 0.0:
             raise ValueError("optim.scale_embedding_lr must be >= 0.")
+        if scale_embedding_lr != 1.0 and lr_scaling is None:
+            raise ValueError(
+                "optim.scale_embedding_lr has no effect when optim.lr_scaling is "
+                "None; set lr_scaling='si' (or 'mup'/'mup_depth') to scale "
+                "embedding learning rates, or leave scale_embedding_lr at 1.0."
+            )
         object.__setattr__(self, "scale_embedding_lr", scale_embedding_lr)
 
         weight_decay = _normalize_finite_float(
@@ -381,6 +394,24 @@ class OptimConfig:
                 self.schedule, legacy_aliases=_LEGACY_SCHEDULE_NAME_ALIASES
             ),
         )
+
+        warmup_steps = _normalize_int(
+            self.warmup_steps, field_name="optim.warmup_steps"
+        )
+        if warmup_steps < 0:
+            raise ValueError("optim.warmup_steps must be >= 0.")
+        object.__setattr__(self, "warmup_steps", warmup_steps)
+
+        decay_steps = _normalize_int(self.decay_steps, field_name="optim.decay_steps")
+        if decay_steps < 0:
+            raise ValueError("optim.decay_steps must be >= 0.")
+        if decay_steps > 0 and self.schedule == "cosine":
+            raise ValueError(
+                "optim.decay_steps is only used by the 'wsd' schedule; the "
+                "'cosine' schedule always decays over "
+                "training.num_steps - warmup_steps."
+            )
+        object.__setattr__(self, "decay_steps", decay_steps)
 
 
 @dataclass(frozen=True)

@@ -339,11 +339,26 @@ def test_root_config_canonicalizes_registry_names():
         ({"precondition_frequency": 0}, "optim.precondition_frequency must be > 0"),
         ({"scale_embedding_lr": -1.0}, "optim.scale_embedding_lr must be >= 0"),
         ({"lr_scaling": "wide"}, "optim.lr_scaling must be"),
+        ({"lr_scaling": "standard"}, "optim.lr_scaling='standard' is ambiguous"),
+        ({"scale_embedding_lr": 0.5}, "no effect when optim.lr_scaling is None"),
+        ({"warmup_steps": -1}, "optim.warmup_steps must be >= 0"),
+        ({"decay_steps": -1}, "optim.decay_steps must be >= 0"),
+        (
+            {"schedule": "cosine", "decay_steps": 5},
+            "only used by the 'wsd' schedule",
+        ),
     ],
 )
 def test_optim_config_rejects_invalid_numeric_constraints(kwargs, match):
     with pytest.raises(ValueError, match=match):
         OptimConfig(**kwargs)
+
+
+def test_optim_config_keeps_si_as_first_class_lr_scaling():
+    cfg = OptimConfig(lr_scaling=" SI ", scale_embedding_lr=0.263)
+
+    assert cfg.lr_scaling == "si"
+    assert cfg.scale_embedding_lr == 0.263
 
 
 @pytest.mark.parametrize(

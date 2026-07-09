@@ -24,13 +24,27 @@ def make_learning_rate(cfg):
     if total_steps <= 0:
         raise ValueError("training.num_steps must be > 0.")
 
-    def _zero_ending_linear(init_value: float, end_value: float, num_updates: int):
+    # Endpoint convention: optax evaluates schedule(count) with count starting
+    # at 0 for the first applied update, so trainer step k uses schedule(k-1).
+    # Every applied step (counts 0 .. num_steps-1) gets a strictly positive LR;
+    # decay reaches zero only at count == num_steps, which is never applied.
+    # Warmup ramps lr/warmup, 2*lr/warmup, ..., lr over the first warmup steps.
+
+    def _warmup_schedule(num_updates: int):
         if num_updates <= 1:
-            return optax.constant_schedule(end_value)
+            return optax.constant_schedule(lr)
         return optax.linear_schedule(
-            init_value=init_value,
-            end_value=end_value,
+            init_value=lr / num_updates,
+            end_value=lr,
             transition_steps=num_updates - 1,
+        )
+
+    def _decay_to_zero_linear(num_updates: int):
+        # Reaches 0 one count past the last applied update.
+        return optax.linear_schedule(
+            init_value=lr,
+            end_value=0.0,
+            transition_steps=max(1, num_updates),
         )
 
     effective_warmup_steps = min(warmup_steps, max(0, total_steps - 1))
@@ -39,16 +53,12 @@ def make_learning_rate(cfg):
         cosine_updates = max(1, total_steps - effective_warmup_steps)
         cosine = optax.cosine_decay_schedule(
             init_value=lr,
-            decay_steps=max(1, cosine_updates - 1),
+            decay_steps=cosine_updates,
         )
         if effective_warmup_steps > 0:
-            warmup = optax.linear_schedule(
-                init_value=0.0,
-                end_value=lr,
-                transition_steps=effective_warmup_steps,
-            )
             return optax.join_schedules(
-                [warmup, cosine], boundaries=[effective_warmup_steps]
+                [_warmup_schedule(effective_warmup_steps), cosine],
+                boundaries=[effective_warmup_steps],
             )
         return cosine
 
@@ -58,13 +68,7 @@ def make_learning_rate(cfg):
         elapsed = 0
 
         if effective_warmup_steps > 0:
-            schedules.append(
-                optax.linear_schedule(
-                    init_value=0.0,
-                    end_value=lr,
-                    transition_steps=effective_warmup_steps,
-                )
-            )
+            schedules.append(_warmup_schedule(effective_warmup_steps))
             elapsed += effective_warmup_steps
 
         updates_after_warmup = total_steps - effective_warmup_steps
@@ -80,9 +84,7 @@ def make_learning_rate(cfg):
 
         if schedules:
             boundaries.append(elapsed)
-        schedules.append(
-            _zero_ending_linear(init_value=lr, end_value=0.0, num_updates=decay_updates)
-        )
+        schedules.append(_decay_to_zero_linear(decay_updates))
 
         if len(schedules) == 1:
             return schedules[0]
@@ -149,8 +151,23 @@ def _with_grad_clip(
 
 def _transformer_payne_lr_factors(cfg) -> dict[str, float]:
     lr_scaling = cfg.optim.lr_scaling
-    if lr_scaling not in {"mup", "mup_depth"}:
-        raise ValueError("Only 'mup' and 'mup_depth' LR scaling are supported.")
+    if lr_scaling not in {"si", "mup", "mup_depth"}:
+        raise ValueError("Only 'si', 'mup', and 'mup_depth' LR scaling are supported.")
+
+    if lr_scaling == "si":
+        # Legacy standard parameterization: embedding groups train at
+        # lr * scale_embedding_lr (the output embedding is NOT width-divided,
+        # unlike mup); all other groups keep the base learning rate.
+        scale_embedding_lr = float(cfg.optim.scale_embedding_lr)
+        return {
+            "emb_in": scale_embedding_lr,
+            "emb_out": scale_embedding_lr,
+            "attn": 1.0,
+            "ff": 1.0,
+            "head": 1.0,
+            "bias": 1.0,
+            "default": 1.0,
+        }
 
     from ..models.transformer_payne import TransformerPayneConfig
 
@@ -184,9 +201,10 @@ def _transformer_payne_lr_factors(cfg) -> dict[str, float]:
 
 
 def _mlp_lr_factors(cfg) -> dict[str, float]:
-    if cfg.optim.lr_scaling == "mup_depth":
+    if cfg.optim.lr_scaling in {"si", "mup_depth"}:
         raise ValueError(
-            "optim.lr_scaling='mup_depth' is only supported for transformer_payne."
+            f"optim.lr_scaling={cfg.optim.lr_scaling!r} is only supported for "
+            "transformer_payne."
         )
     if cfg.optim.lr_scaling != "mup":
         raise ValueError("Only 'mup' LR scaling is supported for mlp.")
