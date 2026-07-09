@@ -539,3 +539,26 @@ def test_train_config_rejects_non_positive_explicit_step_schedules():
         ValueError, match="training.checkpoint_steps\\[1\\] must be > 0"
     ):
         RootConfig(training=TrainConfig(checkpoint_steps=[10, 0]))
+
+
+def test_with_updates_accepts_section_dicts():
+    cfg = RootConfig()
+
+    updated = cfg.with_updates(
+        training={"num_steps": 500, "batch_size": 64},
+        optim={"lr": 3e-4},
+    )
+
+    assert updated.training.num_steps == 500
+    assert updated.training.batch_size == 64
+    # untouched fields of the section are preserved
+    assert updated.training.workdir == cfg.training.workdir
+    assert updated.optim.lr == pytest.approx(3e-4)
+    assert updated.optim.name == cfg.optim.name
+    # original is unchanged
+    assert cfg.training.num_steps == 1000
+
+
+def test_optim_config_warns_when_si_is_effectively_a_noop():
+    with pytest.warns(UserWarning, match="equivalent to lr_scaling=None"):
+        OptimConfig(lr_scaling="si", scale_embedding_lr=1.0)

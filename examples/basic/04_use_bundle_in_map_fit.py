@@ -121,7 +121,12 @@ def main() -> None:
         jit=False,
     )
 
-    ref = emu.reference_scaling_inputs or {}
+    ref = emu.reference_scaling_inputs
+    if ref is None:
+        raise ValueError(
+            "This bundle does not declare reference_scaling_inputs; it cannot "
+            "be used with this physical-input workflow."
+        )
     theta_min = jnp.asarray(ref["min_tree"]["parameters"], dtype=jnp.float32)
     theta_max = jnp.asarray(ref["max_tree"]["parameters"], dtype=jnp.float32)
     theta_true = jnp.asarray([5600.0, 4.2, -0.1], dtype=jnp.float32)

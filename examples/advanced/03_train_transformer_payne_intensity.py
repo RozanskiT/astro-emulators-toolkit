@@ -18,7 +18,6 @@ os.environ.setdefault("JAX_ENABLE_X64", "1")
 from astro_emulators_toolkit import Emulator
 from astro_emulators_toolkit.data import TreeArrayDataset
 from astro_emulators_toolkit.presets import transformer_payne_intensity
-from astro_emulators_toolkit.training import build_callbacks_from_config
 
 import sys
 
@@ -83,12 +82,10 @@ def main() -> None:
         eval_wavelength_grid=eval_wave,
         output_order=("lines", "continuum"),
     )
-    callbacks = build_callbacks_from_config(cfg)
     history = emu.fit(
         TreeArrayDataset(x=x_train, y=y_train),
         validation_dataset=TreeArrayDataset(x=x_val, y=y_val),
-        device_batch_transform=transform,
-        callbacks=callbacks,
+        device_batch_transform=transform
     )
     checkpoint_dir = Path(cfg.training.workdir) / "checkpoints"
     recorded_checkpoint_steps = tuple(

@@ -28,7 +28,12 @@ def main() -> None:
         dtype=np.float32,
     )
     emu = Emulator.from_bundle(bundle)
-    ref = emu.reference_scaling_inputs or {}
+    ref = emu.reference_scaling_inputs
+    if ref is None:
+        raise ValueError(
+            "This bundle does not declare reference_scaling_inputs; it cannot "
+            "be used with this physical-input workflow."
+        )
     x_scaled = normalize_tree(
         {"parameters": x_physical}, ref["min_tree"], ref["max_tree"]
     )

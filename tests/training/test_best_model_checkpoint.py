@@ -241,3 +241,9 @@ def test_load_best_checkpoint_errors_when_never_tracked(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="No best checkpoint"):
         emu.load_best_checkpoint()
+
+def test_best_model_checkpoint_accepts_validation_prefixed_monitor():
+    # History keys are "validation_"-prefixed while eval metrics are bare;
+    # both spellings must work.
+    assert BestModelCheckpoint(monitor="validation_loss").monitor == "loss"
+    assert BestModelCheckpoint(monitor="loss").monitor == "loss"

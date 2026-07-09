@@ -32,7 +32,12 @@ def main() -> None:
     # Freeze once, then jit the sampler init/transition around the full log-density.
     apply_fn = emu.make_frozen_apply(jit=False)
 
-    ref = emu.reference_scaling_inputs or {}
+    ref = emu.reference_scaling_inputs
+    if ref is None:
+        raise ValueError(
+            "This bundle does not declare reference_scaling_inputs; it cannot "
+            "be used with this physical-input workflow."
+        )
     x = normalize_tree(
         {"parameters": np.array([[5600.0, 4.2, -0.1]], dtype=np.float32)},
         ref["min_tree"],

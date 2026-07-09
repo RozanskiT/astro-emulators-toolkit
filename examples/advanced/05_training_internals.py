@@ -12,7 +12,6 @@ from pathlib import Path
 from astro_emulators_toolkit import Emulator
 from astro_emulators_toolkit.data import TreeArrayDataset
 from astro_emulators_toolkit.presets import payne_flux_mlp
-from astro_emulators_toolkit.training import build_callbacks_from_config
 
 import sys
 
@@ -27,11 +26,9 @@ def main() -> None:
         profile="smoke",
     )
     emu = Emulator.from_config(cfg)
-    callbacks = build_callbacks_from_config(cfg)
     history = emu.fit(
         TreeArrayDataset(x=x_train, y=y_train),
-        validation_dataset=TreeArrayDataset(x=x_val, y=y_val),
-        callbacks=callbacks,
+        validation_dataset=TreeArrayDataset(x=x_val, y=y_val)
     )
     print("History keys:", sorted(history.logs.keys()))
     print("Last fit method:", emu.last_fit_method)

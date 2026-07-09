@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+import warnings
+from dataclasses import dataclass, field, is_dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -350,6 +351,13 @@ class OptimConfig:
         )
         if scale_embedding_lr < 0.0:
             raise ValueError("optim.scale_embedding_lr must be >= 0.")
+        if lr_scaling == "si" and scale_embedding_lr == 1.0:
+            warnings.warn(
+                "optim.lr_scaling='si' with scale_embedding_lr=1.0 is "
+                "equivalent to lr_scaling=None (one shared learning rate); "
+                "set scale_embedding_lr to the intended embedding factor.",
+                stacklevel=2,
+            )
         if scale_embedding_lr != 1.0 and lr_scaling is None:
             raise ValueError(
                 "optim.scale_embedding_lr has no effect when optim.lr_scaling is "
@@ -434,6 +442,9 @@ class TrainConfig:
     batch_size: int = 1024
     # total target optimization steps; resume=True trains until state.step reaches num_steps
     num_steps: int = 1000
+    # Advisory record of the intended validation split. fit() does NOT
+    # split automatically: build a validation set yourself (e.g. with
+    # data.train_val_split) and pass it as validation_dataset.
     val_fraction: float = 0.1
 
     shuffle: bool = True
@@ -446,13 +457,18 @@ class TrainConfig:
     evaluation_interval_steps: int | None = 500
     # optional absolute optimization steps to run validation on; unioned with evaluation_interval_steps
     evaluation_steps: tuple[int, ...] | None = None
+    # 0 or None disables periodic checkpointing (as for the logging and
+    # evaluation intervals above)
     checkpoint_interval_steps: int | None = 500
     # optional absolute optimization steps to checkpoint on; unioned with checkpoint_interval_steps
     checkpoint_steps: tuple[int, ...] | None = None
-    # None means preserve all saved checkpoints
+    # Retention only — does NOT enable/disable checkpointing (that is
+    # checkpoint_interval_steps/checkpoint_steps). None preserves all
+    # saved checkpoints.
     max_saved_checkpoints: int | None = 5
-    # Validation metric name to track for best-model checkpointing (e.g.
-    # "loss"). When set, the single best TrainState is kept under
+    # Validation metric name to track for best-model checkpointing — the
+    # bare eval-metric name (e.g. "loss", "mae"), not the "validation_"-
+    # prefixed history key (a "validation_" prefix is stripped if given). When set, the single best TrainState is kept under
     # checkpoints_best/ in the workdir, separate from the resume checkpoints;
     # restore it with Emulator.load_best_checkpoint(). None disables tracking.
     checkpoint_best_metric: str | None = None
@@ -711,8 +727,25 @@ class RootConfig:
     io: IOSpec = field(default_factory=IOSpec)
 
     def with_updates(self, **kwargs) -> "RootConfig":
-        """Return a copy with selected top-level fields replaced."""
-        return canonicalize_config_names(replace(self, **kwargs))
+        """Return a copy with selected top-level fields replaced.
+
+        A config section may be given either as a full section object or as a
+        dict of field updates merged into the existing section::
+
+            cfg.with_updates(training={"num_steps": 500, "batch_size": 64})
+        """
+        resolved: dict[str, Any] = {}
+        for name, value in kwargs.items():
+            current = getattr(self, name, None)
+            if (
+                isinstance(value, dict)
+                and is_dataclass(current)
+                and not isinstance(current, type)
+            ):
+                resolved[name] = replace(current, **value)
+            else:
+                resolved[name] = value
+        return canonicalize_config_names(replace(self, **resolved))
 
 
 def canonicalize_config_names(cfg: RootConfig) -> RootConfig:

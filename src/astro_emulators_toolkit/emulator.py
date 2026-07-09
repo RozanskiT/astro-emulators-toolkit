@@ -619,7 +619,9 @@ class Emulator:
             ):
                 release_label = f"{release_label} ({release_status})"
         lines = [
-            "Loaded emulator bundle",
+            "Loaded emulator bundle"
+            if self.bundle_metadata is not None
+            else "Emulator (no bundle loaded)",
             f"model={self.cfg.model.name}",
             f"bundle_format_version={metadata.get('bundle_format_version', 'unknown')}",
             f"bundle_id={metadata.get('bundle_id', 'unknown')}",

@@ -12,7 +12,6 @@ from pathlib import Path
 from astro_emulators_toolkit import Emulator, normalize_tree
 from astro_emulators_toolkit.data import TreeArrayDataset
 from astro_emulators_toolkit.presets import payne_flux_mlp
-from astro_emulators_toolkit.training import build_callbacks_from_config
 
 import sys
 
@@ -29,9 +28,10 @@ def main() -> None:
     x_train, y_train, x_val, y_val, wave = split_randomized_flux(
         val_fraction=0.1, seed=0
     )
+    profile = "smoke"
     cfg = payne_flux_mlp(
         workdir=workdir,
-        profile="smoke",
+        profile=profile,
     )
 
     # Train on min-max scaled labels and record the scaling in the bundle, so
@@ -40,13 +40,11 @@ def main() -> None:
     max_tree = {"parameters": x_train["parameters"].max(axis=0)}
 
     emu = Emulator.from_config(cfg)
-    callbacks = build_callbacks_from_config(cfg)
     history = emu.fit(
         TreeArrayDataset(x=normalize_tree(x_train, min_tree, max_tree), y=y_train),
         validation_dataset=TreeArrayDataset(
             x=normalize_tree(x_val, min_tree, max_tree), y=y_val
-        ),
-        callbacks=callbacks,
+        )
     )
 
     x_pred = normalize_tree(
@@ -66,7 +64,7 @@ def main() -> None:
         }
     )
     print("Steps:", len(history.logs.get("training_loss", [])))
-    print("Preset profile:", "smoke")
+    print("Preset profile:", profile)
     print("Predicted full-spectrum shape:", pred.shape)
     print("Predicted wavelengths:", wave.shape[0])
     print("Bundle:", bundle)

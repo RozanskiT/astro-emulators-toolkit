@@ -368,6 +368,9 @@ class BestModelCheckpoint(Callback):
 
     def __init__(self, monitor: str = "loss", mode: Literal["min", "max"] = "min"):
         monitor = str(monitor).strip()
+        # History keys are "validation_"-prefixed; eval metrics are bare.
+        # Accept either spelling.
+        monitor = monitor.removeprefix("validation_")
         if not monitor:
             raise ValueError("BestModelCheckpoint monitor must be a non-empty string.")
         if mode not in {"min", "max"}:

@@ -29,7 +29,6 @@ def cannon_flux(
         logging_interval_steps=1,
         evaluation_interval_steps=1,
         checkpoint_interval_steps=0,
-        max_saved_checkpoints=0,
     )
     return RootConfig(
         io=IOSpec(
