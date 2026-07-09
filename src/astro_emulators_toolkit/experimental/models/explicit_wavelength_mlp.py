@@ -114,6 +114,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
+            param_dtype=dtype,
         )
         self.param_proj_1 = nnx.Linear(
             in_dim,
@@ -121,6 +122,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
+            param_dtype=dtype,
         )
         self.param_proj_2 = nnx.Linear(
             cfg.parameter_hidden_dim,
@@ -128,6 +130,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
+            param_dtype=dtype,
         )
         self.joint_proj_1 = nnx.Linear(
             cfg.wavelength_hidden_dim + cfg.parameter_hidden_dim,
@@ -135,6 +138,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
+            param_dtype=dtype,
         )
         self.joint_proj_2 = nnx.Linear(
             cfg.joint_hidden_dim,
@@ -142,6 +146,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
+            param_dtype=dtype,
         )
 
     def _act(self, x: jnp.ndarray) -> jnp.ndarray:

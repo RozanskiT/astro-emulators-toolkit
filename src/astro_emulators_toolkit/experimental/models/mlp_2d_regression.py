@@ -58,6 +58,7 @@ class MLP2DRegression(nnx.Module):
                     rngs=rngs,
                     use_bias=cfg.use_bias,
                     dtype=dtype,
+                    param_dtype=dtype,
                 )
                 for i in range(len(sizes) - 1)
             ]

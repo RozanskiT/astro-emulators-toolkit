@@ -44,7 +44,10 @@ class DataLoader:
             return self._cached_perm
 
         perm = np.arange(n, dtype=np.int64)
-        rng = np.random.default_rng(self.seed + cycle)
+        # SeedSequence keys (seed, cycle) independently; seed + cycle would
+        # make adjacent seeds replay each other's permutation streams shifted
+        # by one epoch.
+        rng = np.random.default_rng(np.random.SeedSequence((self.seed, cycle)))
         rng.shuffle(perm)
 
         self._cached_cycle = cycle
@@ -83,8 +86,12 @@ class DataLoader:
     def train_batch(self, step: int) -> dict[str, Any]:
         batch = dict(self.dataset.get_batch(self._train_indices(step)))
         dataset_mask = batch.get("valid_mask")
-        loader_mask = np.ones((self.batch_size,), dtype=np.float32)
-        batch["valid_mask"] = self._combine_valid_masks(dataset_mask, loader_mask)
+        # Train batches are never padded, so the loader contributes an
+        # all-ones mask; only a dataset-provided mask can invalidate rows.
+        if dataset_mask is None:
+            batch["valid_mask"] = np.ones((self.batch_size,), dtype=np.float32)
+        else:
+            batch["valid_mask"] = np.asarray(dataset_mask, dtype=np.float32)
         return batch
 
     @staticmethod

@@ -60,11 +60,6 @@ def save(
     return str(mngr.directory / str(step))
 
 
-def latest_step(mngr) -> int | None:
-    step = mngr.latest_step()
-    return None if step is None else int(step)
-
-
 def latest_custom_metadata(mngr) -> dict[str, Any] | None:
     """Return the custom metadata saved with the latest checkpoint, if any.
 
@@ -92,10 +87,6 @@ def _restore_step(mngr, step: int, target):
         int(step), args=ocp.args.StandardRestore(target_for_restore)
     )
     return restored.replace(rng_key=jax.random.wrap_key_data(restored.rng_key))
-
-
-def restore(mngr, step: int, target):
-    return _restore_step(mngr, step, target)
 
 
 def restore_latest(mngr, target):

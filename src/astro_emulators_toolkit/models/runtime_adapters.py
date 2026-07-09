@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from ..data.protocols import DeviceBatchTransform
 from .._typing import AffineLeafSpecs
@@ -253,17 +253,6 @@ def _select_wavelength_leaf(input_leaf_paths: list[str]) -> str:
     return candidates[0]
 
 
-def _input_affine_leaf_specs(
-    role_paths: dict[str, str], affine_specs: AffineLeafSpecs
-) -> AffineLeafSpecs:
-    return {
-        path: affine_specs[path]
-        for key, path in role_paths.items()
-        if key.endswith("input_leaf")
-        or key in {"parameter_leaf", "wavelength_leaf", "input_leaf"}
-    }
-
-
 def _section_affine_leaf_specs(
     affine_specs: AffineLeafSpecs, *, section_name: str
 ) -> AffineLeafSpecs:
@@ -344,8 +333,113 @@ def _require_model_init_hint(model_init: dict[str, Any], key: str) -> int:
     return value
 
 
+class MinMaxValidatedAdapterMixin:
+    """Shared min/max-tree spec validation for adapters with affine_leaf_specs.
+
+    Requires the concrete adapter to provide
+    ``affine_leaf_specs(cfg=..., spec=..., model_init=...)``.
+    """
+
+    if TYPE_CHECKING:
+
+        def affine_leaf_specs(
+            self, *, cfg: Any, spec: dict[str, Any], model_init: dict[str, Any]
+        ) -> AffineLeafSpecs: ...
+
+    def validate_reference_scaling_inputs(
+        self,
+        *,
+        cfg,
+        spec: dict[str, Any],
+        scaling: dict[str, Any],
+        model_init: dict[str, Any],
+    ) -> None:
+        if (
+            not isinstance(scaling, dict)
+            or "min_tree" not in scaling
+            or "max_tree" not in scaling
+        ):
+            raise ValueError(
+                "reference_scaling_inputs must provide 'min_tree' and 'max_tree'."
+            )
+        specs = _section_affine_leaf_specs(
+            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
+            section_name="inputs",
+        )
+        _validate_affine_tree(
+            tree=scaling["min_tree"],
+            expected_specs=specs,
+            field_name="reference_scaling_inputs.min_tree",
+        )
+        _validate_affine_tree(
+            tree=scaling["max_tree"],
+            expected_specs=specs,
+            field_name="reference_scaling_inputs.max_tree",
+        )
+
+    def validate_reference_scaling_outputs(
+        self,
+        *,
+        cfg,
+        spec: dict[str, Any],
+        scaling: dict[str, Any],
+        model_init: dict[str, Any],
+    ) -> None:
+        if (
+            not isinstance(scaling, dict)
+            or "min_tree" not in scaling
+            or "max_tree" not in scaling
+        ):
+            raise ValueError(
+                "reference_scaling_outputs must provide 'min_tree' and 'max_tree'."
+            )
+        specs = _section_affine_leaf_specs(
+            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
+            section_name="outputs",
+        )
+        _validate_affine_tree(
+            tree=scaling["min_tree"],
+            expected_specs=specs,
+            field_name="reference_scaling_outputs.min_tree",
+        )
+        _validate_affine_tree(
+            tree=scaling["max_tree"],
+            expected_specs=specs,
+            field_name="reference_scaling_outputs.max_tree",
+        )
+
+    def validate_input_domain(
+        self,
+        *,
+        cfg,
+        spec: dict[str, Any],
+        domain: dict[str, Any],
+        model_init: dict[str, Any],
+    ) -> None:
+        if (
+            not isinstance(domain, dict)
+            or "min_tree" not in domain
+            or "max_tree" not in domain
+        ):
+            raise ValueError("input_domain must provide 'min_tree' and 'max_tree'.")
+        specs = _section_affine_leaf_specs(
+            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
+            section_name="inputs",
+        )
+        _validate_affine_tree(
+            tree=domain["min_tree"],
+            expected_specs=specs,
+            field_name="input_domain.min_tree",
+        )
+        _validate_affine_tree(
+            tree=domain["max_tree"],
+            expected_specs=specs,
+            field_name="input_domain.max_tree",
+        )
+
+
 @dataclass(frozen=True)
-class ArrayRuntimeAdapter:
+class ArrayRuntimeAdapter(MinMaxValidatedAdapterMixin):
     family_name: str = "array_family"
     default_input_leaf_key: str = "parameters"
     default_output_leaf_key: str = "predictions"
@@ -464,97 +558,6 @@ class ArrayRuntimeAdapter:
             },
         }
 
-    def validate_reference_scaling_inputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_inputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.max_tree",
-        )
-
-    def validate_reference_scaling_outputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_outputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="outputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.max_tree",
-        )
-
-    def validate_input_domain(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        domain: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(domain, dict)
-            or "min_tree" not in domain
-            or "max_tree" not in domain
-        ):
-            raise ValueError("input_domain must provide 'min_tree' and 'max_tree'.")
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=domain["min_tree"],
-            expected_specs=specs,
-            field_name="input_domain.min_tree",
-        )
-        _validate_affine_tree(
-            tree=domain["max_tree"],
-            expected_specs=specs,
-            field_name="input_domain.max_tree",
-        )
-
     def describe_runtime(
         self, *, cfg, spec: dict[str, Any], model_init: dict[str, Any]
     ) -> dict[str, Any]:
@@ -590,7 +593,7 @@ class CannonRuntimeAdapter(ArrayRuntimeAdapter):
 
 
 @dataclass(frozen=True)
-class TransformerPayneRuntimeAdapter:
+class TransformerPayneRuntimeAdapter(MinMaxValidatedAdapterMixin):
     def resolve_init_context(
         self,
         *,
@@ -738,97 +741,6 @@ class TransformerPayneRuntimeAdapter:
             role_paths["wavelength_leaf"]: {"mode": "scalar_only"},
             role_paths["output_leaf"]: output_spec,
         }
-
-    def validate_reference_scaling_inputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_inputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.max_tree",
-        )
-
-    def validate_reference_scaling_outputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_outputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="outputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.max_tree",
-        )
-
-    def validate_input_domain(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        domain: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(domain, dict)
-            or "min_tree" not in domain
-            or "max_tree" not in domain
-        ):
-            raise ValueError("input_domain must provide 'min_tree' and 'max_tree'.")
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=domain["min_tree"],
-            expected_specs=specs,
-            field_name="input_domain.min_tree",
-        )
-        _validate_affine_tree(
-            tree=domain["max_tree"],
-            expected_specs=specs,
-            field_name="input_domain.max_tree",
-        )
 
     def make_device_batch_transform(
         self, *, cfg, spec: dict[str, Any], **kwargs: Any

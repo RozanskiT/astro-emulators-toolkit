@@ -402,9 +402,7 @@ def fit(
                             vb = _to_jax_batch(vb_np)
                             pred, vb = eval_predict(state, vb)
                             eval_state = task.update_eval_state(eval_state, pred, vb)
-                        agg = logs_device_to_python(
-                            jax.device_get(task.finalize_eval(eval_state))
-                        )
+                        agg = logs_device_to_python(task.finalize_eval(eval_state))
                     else:
                         sums: dict[str, float] = {}
                         denom = 0.0

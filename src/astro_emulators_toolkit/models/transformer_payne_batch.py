@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Mapping, cast
 
@@ -127,7 +126,9 @@ def _inject_query_wavelengths(
     _extract_role_leaf(
         x_payload, parameter_role_path, section_name="inputs", field_name="input"
     )
-    out = deepcopy(x_payload)
+    # Rebuild the dict containers without copying (possibly traced) leaf
+    # arrays; set_leaf_by_path below must not mutate the caller's tree.
+    out = jax.tree_util.tree_map(lambda leaf: leaf, x_payload)
     set_leaf_by_path(
         out,
         _relative_role_path(wavelength_role_path, section_name="inputs"),

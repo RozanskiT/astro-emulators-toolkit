@@ -254,11 +254,9 @@ class ProgressBarLogger(Callback):
             every_n_steps, field_name="ProgressBarLogger every_n_steps"
         )
         self._t0: float | None = None
-        self._last_print = 0
 
     def on_train_begin(self, logs=None):
         self._t0 = time.time()
-        self._last_print = 0
 
     def on_train_batch_end(self, step: int, logs: dict[str, Any]):
         if self.every_n_steps is not None and step % self.every_n_steps != 0:
@@ -274,7 +272,6 @@ class ProgressBarLogger(Callback):
             msg += f"  loss={float(loss):.5g}"
         msg += f"  t={dt:.1f}s"
         print(msg, end="", flush=True)
-        self._last_print = step
 
     def on_eval_end(self, step: int, logs: dict[str, Any]):
         if self.every_n_steps is not None and step % self.every_n_steps != 0:

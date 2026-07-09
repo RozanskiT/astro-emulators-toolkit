@@ -40,7 +40,7 @@ def _uniform_initializer(bound: float) -> Callable[..., jax.Array]:
 class SirenConfig:
     hidden_sizes: tuple[int, ...] = (128, 128, 128)
     omega0_first: float = 30.0
-    omega0_hidden: float = 1.0
+    omega0_hidden: float = 30.0
     use_bias: bool = True
     dtype: str = "float32"
 
@@ -81,7 +81,7 @@ class SirenConfig:
                 d.get("omega0_first", 30.0), field_name="omega0_first"
             ),
             omega0_hidden=_positive_finite_float(
-                d.get("omega0_hidden", 1.0), field_name="omega0_hidden"
+                d.get("omega0_hidden", 30.0), field_name="omega0_hidden"
             ),
             use_bias=parse_bool(d.get("use_bias", True), field_name="use_bias"),
             dtype=dtype,
@@ -112,6 +112,7 @@ class Siren(nnx.Module):
                     rngs=rngs,
                     use_bias=cfg.use_bias,
                     dtype=dtype,
+                    param_dtype=dtype,
                     kernel_init=_uniform_initializer(float(bound)),
                     bias_init=jax.nn.initializers.zeros,
                 )

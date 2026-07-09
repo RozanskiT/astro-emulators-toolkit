@@ -308,7 +308,7 @@ class OptimConfig:
     decay_steps: int = 0  # used by "wsd" (warmup-stable-decay)
     weight_decay: float = 0.0
     grad_clip: float = 0.0
-    b1: float = 0.9
+    b1: float = 0.9  # Adam beta1; also reused as SGD momentum
     b2: float = 0.999
     eps: float = 1e-8
     precondition_frequency: int = 10

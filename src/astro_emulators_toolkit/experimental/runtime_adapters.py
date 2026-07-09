@@ -16,6 +16,7 @@ from ..models.canonical_wrappers import (
 from ..io_trees import set_leaf_by_path
 from ..models.runtime_adapters import (
     ArrayRuntimeAdapter,
+    MinMaxValidatedAdapterMixin,
     _batched_last_axis_size,
     _extract_role_leaf,
     _extract_single_array_leaf,
@@ -24,15 +25,13 @@ from ..models.runtime_adapters import (
     _metadata_leaf_for_role,
     _require_model_init_hint,
     _require_positive_int,
-    _section_affine_leaf_specs,
     _section_leaf_paths,
     _select_wavelength_leaf,
-    _validate_affine_tree,
 )
 
 
 @dataclass(frozen=True)
-class ExplicitWavelengthMLPRuntimeAdapter:
+class ExplicitWavelengthMLPRuntimeAdapter(MinMaxValidatedAdapterMixin):
     family_name: str = "experimental/explicit_wavelength_mlp"
     default_input_leaf_key: str = "parameters"
     default_wavelength_leaf_key: str = "wavelengths"
@@ -195,97 +194,6 @@ class ExplicitWavelengthMLPRuntimeAdapter:
             role_paths["wavelength_leaf"]: {"mode": "scalar_only"},
             role_paths["output_leaf"]: output_spec,
         }
-
-    def validate_reference_scaling_inputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_inputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.max_tree",
-        )
-
-    def validate_reference_scaling_outputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_outputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="outputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.max_tree",
-        )
-
-    def validate_input_domain(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        domain: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(domain, dict)
-            or "min_tree" not in domain
-            or "max_tree" not in domain
-        ):
-            raise ValueError("input_domain must provide 'min_tree' and 'max_tree'.")
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=domain["min_tree"],
-            expected_specs=specs,
-            field_name="input_domain.min_tree",
-        )
-        _validate_affine_tree(
-            tree=domain["max_tree"],
-            expected_specs=specs,
-            field_name="input_domain.max_tree",
-        )
 
     def make_device_batch_transform(
         self, *, cfg, spec: dict[str, Any], **kwargs: Any

@@ -40,7 +40,7 @@ def cannon_design_matrix(x: jnp.ndarray, *, include_bias: bool = True) -> jnp.nd
 
     n_samples, in_dim = x.shape
     tri_i, tri_j = np.triu_indices(int(in_dim))
-    quadratic = jnp.einsum("bi,bj->bij", x, x)[:, tri_i, tri_j]
+    quadratic = x[:, tri_i] * x[:, tri_j]
 
     columns = [x, quadratic]
     if include_bias:

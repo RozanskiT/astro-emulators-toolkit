@@ -226,7 +226,16 @@ def _mlp_lr_factors(cfg) -> dict[str, float]:
             "optim.lr_scaling='mup' requires non-empty model.params.hidden_sizes."
         )
 
-    width_scaling = float(model_cfg.hidden_sizes[0]) / float(model_cfg.reference_width)
+    hidden_sizes = tuple(int(size) for size in model_cfg.hidden_sizes)
+    if len(set(hidden_sizes)) != 1:
+        raise ValueError(
+            "optim.lr_scaling='mup' for mlp requires uniform hidden_sizes "
+            f"(got {hidden_sizes}); the width factor is derived from a single "
+            "hidden width."
+        )
+    # Faithful to the original recipe: ALL dense kernels are width-divided,
+    # including the input and output layers (nonstandard MuP, deliberate).
+    width_scaling = float(hidden_sizes[0]) / float(model_cfg.reference_width)
     return {
         "mlp_kernel": 1.0 / width_scaling,
         "bias": 1.0,
@@ -244,6 +253,7 @@ def _lr_scaling_factors(cfg) -> dict[str, float]:
     )
 
 
+# Bias/vector leaf names used by aemu model families (kept at base LR).
 _BIAS_PARAM_NAMES = {
     "b",
     "b0",
@@ -252,16 +262,6 @@ _BIAS_PARAM_NAMES = {
     "bk",
     "bv",
     "bo",
-    "be0",
-    "be1",
-    "b_q",
-    "b_k",
-    "b_v",
-    "b_o",
-    "bfi",
-    "bfo",
-    "bp0",
-    "bp1",
     "bias",
 }
 
