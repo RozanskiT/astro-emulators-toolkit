@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from astro_emulators_toolkit import Emulator
+from astro_emulators_toolkit import Emulator, normalize_tree
 from astro_emulators_toolkit.data import TreeArrayDataset
 from astro_emulators_toolkit.presets import payne_flux_mlp
 from astro_emulators_toolkit.training import build_callbacks_from_config
@@ -34,16 +34,37 @@ def main() -> None:
         profile="smoke",
     )
 
+    # Train on min-max scaled labels and record the scaling in the bundle, so
+    # consumers can reproduce the training-space inputs (see example 02).
+    min_tree = {"parameters": x_train["parameters"].min(axis=0)}
+    max_tree = {"parameters": x_train["parameters"].max(axis=0)}
+
     emu = Emulator.from_config(cfg)
     callbacks = build_callbacks_from_config(cfg)
     history = emu.fit(
-        TreeArrayDataset(x=x_train, y=y_train),
-        validation_dataset=TreeArrayDataset(x=x_val, y=y_val),
+        TreeArrayDataset(x=normalize_tree(x_train, min_tree, max_tree), y=y_train),
+        validation_dataset=TreeArrayDataset(
+            x=normalize_tree(x_val, min_tree, max_tree), y=y_val
+        ),
         callbacks=callbacks,
     )
 
-    pred = emu.predict({"parameters": x_val["parameters"][:2]})["flux"]
-    bundle = emu.save_bundle()
+    x_pred = normalize_tree(
+        {"parameters": x_val["parameters"][:2]}, min_tree, max_tree
+    )
+    pred = emu.predict(x_pred)["flux"]
+    bundle = emu.save_bundle(
+        spec={
+            "reference_scaling_inputs": {
+                "kind": "affine_minmax_v1",
+                "applies_to": "inputs",
+                "source_space": "physical_input_dict_tree_v1",
+                "target_space": "canonical_input_dict_tree_v1",
+                "min_tree": {"parameters": [float(v) for v in min_tree["parameters"]]},
+                "max_tree": {"parameters": [float(v) for v in max_tree["parameters"]]},
+            },
+        }
+    )
     print("Steps:", len(history.logs.get("training_loss", [])))
     print("Preset profile:", "smoke")
     print("Predicted full-spectrum shape:", pred.shape)

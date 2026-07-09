@@ -13,7 +13,7 @@ def test_build_provenance_survives_missing_git_binary(monkeypatch):
 
     provenance = build_provenance()
 
-    assert provenance["git_commit"] is None
+    assert provenance["working_tree_git_commit"] is None
     assert provenance["toolkit_version"]
 
 
@@ -25,4 +25,4 @@ def test_build_provenance_survives_git_timeout(monkeypatch):
 
     provenance = build_provenance()
 
-    assert provenance["git_commit"] is None
+    assert provenance["working_tree_git_commit"] is None

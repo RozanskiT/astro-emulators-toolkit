@@ -9,12 +9,9 @@ import optax
 def make_learning_rate(cfg):
     lr = float(cfg.optim.lr)
     schedule_name = str(cfg.optim.schedule).lower()
-    warmup_steps = int(cfg.optim.warmup_steps)
     decay_steps = int(cfg.optim.decay_steps)
     total_steps = int(cfg.training.num_steps)
 
-    if warmup_steps < 0:
-        raise ValueError("optim.warmup_steps must be >= 0.")
     if decay_steps < 0:
         raise ValueError("optim.decay_steps must be >= 0.")
 
@@ -23,6 +20,14 @@ def make_learning_rate(cfg):
 
     if total_steps <= 0:
         raise ValueError("training.num_steps must be > 0.")
+
+    if cfg.optim.warmup_steps is None:
+        # Automatic linear warmup over the first 10% of training.
+        warmup_steps = int(round(0.1 * total_steps))
+    else:
+        warmup_steps = int(cfg.optim.warmup_steps)
+    if warmup_steps < 0:
+        raise ValueError("optim.warmup_steps must be >= 0.")
 
     # Endpoint convention: optax evaluates schedule(count) with count starting
     # at 0 for the first applied update, so trainer step k uses schedule(k-1).

@@ -67,6 +67,7 @@ def _transformer_mup_cfg():
             b1=0.0,
             lr_scaling="mup",
             scale_embedding_lr=0.5,
+            schedule="constant",
         ),
     )
 
@@ -125,7 +126,7 @@ def test_make_tx_mlp_mup_scales_wrapped_kernels():
         model=ModelSpec(
             name="mlp", params={"hidden_sizes": (8,), "reference_width": 4}
         ),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup"),
+        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
     )
 
     tx = make_tx(cfg, params=params)
@@ -158,7 +159,7 @@ def test_emulator_from_config_mlp_mup_produces_scaled_groups(tmp_path):
             params={"hidden_sizes": (8, 8), "activation": "tanh", "reference_width": 4},
         ),
         task=TaskSpec(name="regression", params={"loss": "mse"}),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup"),
+        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
         training=TrainConfig(workdir=str(tmp_path / "mlp"), batch_size=4, num_steps=1),
     )
     emu = Emulator.from_config(cfg)
@@ -197,7 +198,12 @@ def test_emulator_from_config_transformer_payne_mup_produces_scaled_groups(tmp_p
         ),
         task=TaskSpec(name="regression", params={"loss": "mse"}),
         optim=OptimConfig(
-            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", scale_embedding_lr=0.5
+            name="sgd",
+            lr=1.0,
+            b1=0.0,
+            lr_scaling="mup",
+            scale_embedding_lr=0.5,
+            schedule="constant",
         ),
         training=TrainConfig(
             workdir=str(tmp_path / "transformer"), batch_size=4, num_steps=1

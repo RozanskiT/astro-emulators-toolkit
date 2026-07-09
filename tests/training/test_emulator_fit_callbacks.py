@@ -67,9 +67,7 @@ def test_build_callbacks_from_config_returns_empty_list_when_visible_callbacks_d
     assert build_callbacks_from_config(cfg) == []
 
 
-def test_emulator_fit_treats_callbacks_none_the_same_as_empty_list(
-    monkeypatch, tmp_path
-):
+def _run_fit_and_capture_callbacks(monkeypatch, tmp_path, *, callbacks):
     observed_callbacks = None
 
     def _fake_fit_backend(**kwargs):
@@ -116,6 +114,27 @@ def test_emulator_fit_treats_callbacks_none_the_same_as_empty_list(
             y = np.zeros((len(idx), 1), dtype=np.float32)
             return {"x": {"parameters": x}, "y": {"predictions": y}}
 
-    emu.fit(_Dataset(), callbacks=None)
+    emu.fit(_Dataset(), callbacks=callbacks)
+    return observed_callbacks
 
-    assert observed_callbacks == []
+
+def test_emulator_fit_defaults_callbacks_none_to_config_built_callbacks(
+    monkeypatch, tmp_path
+):
+    # callbacks=None must honor config-declared checkpoint/progress settings;
+    # this is what makes training.checkpoint_interval_steps effective by
+    # default instead of being a silently inert config field.
+    observed = _run_fit_and_capture_callbacks(monkeypatch, tmp_path, callbacks=None)
+
+    assert [callback.__class__.__name__ for callback in observed] == [
+        "ProgressBarLogger",
+        "ModelCheckpoint",
+    ]
+
+
+def test_emulator_fit_callbacks_empty_list_disables_all_callbacks(
+    monkeypatch, tmp_path
+):
+    observed = _run_fit_and_capture_callbacks(monkeypatch, tmp_path, callbacks=[])
+
+    assert observed == []

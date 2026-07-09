@@ -109,6 +109,23 @@ class _SingleCSVLogger(Callback):
 
     def on_train_begin(self, logs=None):
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        resuming = bool((logs or {}).get("resume")) and (
+            int((logs or {}).get("start_step") or 0) > 0
+        )
+        if resuming and self.path.exists() and self.path.stat().st_size > 0:
+            # Continue the earlier segment's file instead of truncating it.
+            with self.path.open("r", newline="") as existing:
+                header_line = existing.readline().strip()
+            self._file = self.path.open("a", newline="")
+            if header_line:
+                self._writer = csv.DictWriter(
+                    self._file,
+                    fieldnames=header_line.split(","),
+                    extrasaction="ignore",
+                )
+            else:
+                self._writer = None
+            return
         self._file = self.path.open("w", newline="")
         self._writer = None
 

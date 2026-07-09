@@ -29,6 +29,7 @@ def create_manager(workdir: str | Path, *, cfg: RootConfig):
             else int(cfg.training.max_saved_checkpoints)
         ),
         create=True,
+        enable_async_checkpointing=bool(cfg.training.async_checkpointing),
     )
     metadata = {
         "tool": "astro_emulators_toolkit",
@@ -55,6 +56,26 @@ def save(
 def latest_step(mngr) -> int | None:
     step = mngr.latest_step()
     return None if step is None else int(step)
+
+
+def latest_custom_metadata(mngr) -> dict[str, Any] | None:
+    """Return the custom metadata saved with the latest checkpoint, if any.
+
+    Defensive by design: checkpoint managers used in tests (and older orbax
+    versions) may not expose step metadata, in which case ``None`` is returned
+    rather than failing the resume path.
+    """
+    try:
+        step = mngr.latest_step()
+        if step is None:
+            return None
+        meta = mngr.metadata(int(step))
+    except Exception:
+        return None
+    custom = getattr(meta, "custom_metadata", None)
+    if isinstance(custom, dict):
+        return dict(custom)
+    return None
 
 
 def _restore_step(mngr, step: int, target):

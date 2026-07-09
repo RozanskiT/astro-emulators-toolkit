@@ -411,7 +411,30 @@ print(bundle_dir)
 - For `closed_form_linear`, a scalar target leaf with shape `(N,)` is treated as one output channel; fitted coefficients and predictions keep an explicit trailing dimension of 1.
 - Presets use `profile="smoke"` for short example runs and `profile="cpu_recommended"` for longer CPU-oriented defaults.
 - Training and inference are tested for CPU/single-device JAX execution. Single-GPU execution should work with a correct JAX GPU installation. Multi-GPU training is not yet part of the stable contract; the current trainer does not shard batches or replicate/partition training state across devices.
-- Use `build_callbacks_from_config(cfg)` when you want config-driven progress, evaluation, and run-state callbacks.
+- `fit(callbacks=None)` builds config-declared callbacks with
+  `build_callbacks_from_config(cfg)` by default, so
+  `training.checkpoint_interval_steps` and progress logging take effect
+  without extra wiring. Pass `callbacks=[]` to run without callbacks, or an
+  explicit list to take full control.
+- The default learning-rate schedule is cosine decay with automatic linear
+  warmup over the first 10% of `training.num_steps`
+  (`optim.warmup_steps=None`). Set `optim.warmup_steps` explicitly to
+  override, `0` to disable warmup, or `optim.schedule="constant"` for a fixed
+  learning rate.
+- Run provenance: the first `fit(...)` writes `run_config.json` in the
+  workdir; later fits never overwrite it (a changed config is recorded as
+  `run_config.resume-N.json`), and every `fit(...)` appends the effective
+  choices — resolved solver, optimizer source (config vs
+  `configure_training` override), optim settings, toolkit version — to
+  `effective_runs.jsonl`.
+- Resuming continues the LR schedule from the restored optimizer step. A
+  resume with a changed optimizer/schedule config (including a different
+  `training.num_steps`, which reshapes cosine decay) emits a warning based on
+  the fingerprint stored in the checkpoint, and `resume=True` with no
+  checkpoint found warns before training from scratch. `CSVLogger` appends to
+  an existing file on resume instead of truncating it.
+- `training.async_checkpointing=False` forces synchronous orbax checkpoint
+  writes — useful when bisecting GPU instability.
 
 ### Advanced training: learning-rate scaling
 

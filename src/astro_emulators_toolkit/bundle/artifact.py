@@ -59,6 +59,7 @@ def save_bundle_artifact(
     dirpath: str | Path | None,
     spec: dict[str, Any] | None,
     extras: dict[str, Any] | None = None,
+    optimizer_source: str | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     if graphdef is None or params is None or model_state is None:
         raise RuntimeError(
@@ -113,6 +114,11 @@ def save_bundle_artifact(
     }
     if last_fit_method is not None:
         metadata["fit_method"] = last_fit_method
+    if optimizer_source is not None:
+        # "config" when the optimizer came from cfg.optim, "external_override"
+        # when configure_training(optimizer=...) supplied it — in which case
+        # the resolved optim block does NOT describe the effective optimizer.
+        metadata["optimizer_source"] = str(optimizer_source)
     if last_fit_metadata is not None:
         metadata["solver_metadata"] = to_json_compatible(dict(last_fit_metadata))
     if extras_payload is not None:

@@ -54,7 +54,10 @@ def build_provenance() -> dict[str, Any]:
             "flax": flax.__version__,
             "optax": _optional_dependency_version("optax"),
         },
-        "git_commit": _safe_git_commit(),
+        # HEAD of whatever git repository the *invoking process* runs in — the
+        # user's analysis repo for an installed toolkit — NOT the toolkit's own
+        # commit (that is what toolkit_version identifies).
+        "working_tree_git_commit": _safe_git_commit(),
     }
 
 

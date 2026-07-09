@@ -79,8 +79,24 @@ def test_history_records_train_and_validation_steps_separately():
     assert history.logs["validation_loss"] == [0.9]
 
 
-def test_make_learning_rate_constant_is_default_scalar():
-    cfg = RootConfig()
+def test_default_schedule_is_linear_warmup_plus_cosine_decay():
+    # The library default is cosine decay with automatic linear warmup over
+    # the first 10% of training.num_steps.
+    cfg = RootConfig(training=TrainConfig(num_steps=1000))
+
+    lr = make_learning_rate(cfg)
+
+    assert callable(lr)
+    peak = float(cfg.optim.lr)
+    assert float(lr(0)) == pytest.approx(peak / 100.0)  # warmup step 1 of 100
+    assert float(lr(50)) == pytest.approx(peak * 51.0 / 100.0)
+    assert float(lr(100)) == pytest.approx(peak)  # cosine peak after warmup
+    assert 0.0 < float(lr(999)) < 0.01 * peak
+    assert float(lr(1000)) == pytest.approx(0.0)
+
+
+def test_make_learning_rate_constant_schedule_is_scalar():
+    cfg = RootConfig(optim=OptimConfig(schedule="constant"))
 
     lr = make_learning_rate(cfg)
 
@@ -141,7 +157,7 @@ def test_make_tx_accepts_schedule_for_all_builtin_optimizers():
 def test_make_tx_applies_global_grad_clip_before_optimizer():
     params = {"w": jnp.zeros((2,), dtype=jnp.float32)}
     grads = {"w": jnp.asarray([3.0, 4.0], dtype=jnp.float32)}
-    cfg = RootConfig(optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, grad_clip=1.0))
+    cfg = RootConfig(optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, grad_clip=1.0, schedule="constant"))
 
     tx = make_tx(cfg)
     updates, _ = tx.update(grads, tx.init(params), params)
@@ -160,7 +176,7 @@ def test_make_tx_lr_scaling_none_keeps_single_shared_lr_without_params():
         "head": {"proj0": {"w": jnp.ones((4, 4), dtype=jnp.float32)}},
     }
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
-    cfg = RootConfig(optim=OptimConfig(name="sgd", lr=0.25, b1=0.0))
+    cfg = RootConfig(optim=OptimConfig(name="sgd", lr=0.25, b1=0.0, schedule="constant"))
 
     tx = make_tx(cfg)
     updates, _ = tx.update(grads, tx.init(params), params)
@@ -209,6 +225,7 @@ def test_make_tx_transformer_payne_mup_scales_parameter_groups():
             b1=0.0,
             lr_scaling="mup",
             scale_embedding_lr=0.5,
+            schedule="constant",
         ),
     )
 
@@ -244,7 +261,8 @@ def test_make_tx_transformer_payne_si_scales_only_embedding_groups():
             name="transformer_payne", params={"dim": 8, "no_layers": 2}
         ),
         optim=OptimConfig(
-            name="sgd", lr=1.0, b1=0.0, lr_scaling="si", scale_embedding_lr=0.25
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="si", scale_embedding_lr=0.25,
+            schedule="constant"
         ),
     )
 
@@ -291,7 +309,7 @@ def test_make_tx_transformer_payne_mup_depth_scales_attention_and_ff_by_depth():
                 "reference_depth": 2,
             },
         ),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup_depth"),
+        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup_depth", schedule="constant"),
     )
 
     tx = make_tx(cfg, params=params)
@@ -315,7 +333,7 @@ def test_make_tx_transformer_payne_mup_uses_model_config_defaults():
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
     cfg = RootConfig(
         model=ModelSpec(name="transformer_payne", params={"reference_width": 64}),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup"),
+        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
     )
 
     tx = make_tx(cfg, params=params)
@@ -371,7 +389,7 @@ def test_make_tx_mlp_mup_scales_kernels_and_leaves_biases_at_base_lr():
             name="mlp",
             params={"hidden_sizes": (8, 8), "reference_width": 4},
         ),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup"),
+        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
     )
 
     tx = make_tx(cfg, params=params)
@@ -389,7 +407,7 @@ def test_make_tx_mlp_mup_uses_default_hidden_width():
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
     cfg = RootConfig(
         model=ModelSpec(name="mlp", params={"reference_width": 128}),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup"),
+        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
     )
 
     tx = make_tx(cfg, params=params)
@@ -435,6 +453,7 @@ def test_make_tx_builds_soap_with_config(monkeypatch):
         optim=OptimConfig(
             name="soap",
             lr=3e-3,
+            schedule="constant",
             b1=0.95,
             b2=0.95,
             eps=1e-8,

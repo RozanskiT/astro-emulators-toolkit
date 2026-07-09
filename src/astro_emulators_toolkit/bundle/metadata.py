@@ -116,10 +116,13 @@ def _resolve_solver_config(cfg) -> dict[str, Any]:
 
 
 def build_resolved_bundle_config(cfg) -> dict[str, Any]:
+    import dataclasses
+
     return {
         "model": _resolve_model_config(cfg),
         "task": _resolve_task_config(cfg),
         "solver": _resolve_solver_config(cfg),
+        "optim": to_json_compatible(dataclasses.asdict(cfg.optim)),
     }
 
 

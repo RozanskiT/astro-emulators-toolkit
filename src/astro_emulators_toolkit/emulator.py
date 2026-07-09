@@ -409,6 +409,7 @@ class Emulator:
 
         self.task: Any | None = None
         self.tx: optax.GradientTransformation | None = None
+        self._optimizer_overridden = False
         self.last_fit_method: str | None = None
         self.last_fit_metadata: dict[str, Any] | None = None
         self.bundle_metadata: dict[str, Any] | None = None
@@ -512,6 +513,7 @@ class Emulator:
         """
         if optimizer is not None:
             self.tx = optimizer
+            self._optimizer_overridden = True
         self.task = (
             task
             if task is not None
@@ -582,13 +584,23 @@ class Emulator:
         The emulator lazily initializes itself from the first training batch when
         necessary. Gradient-based runs use the configured optimizer unless an
         override was attached with :meth:`configure_training`.
+
+        When ``callbacks`` is ``None``, config-declared progress and checkpoint
+        callbacks are built with ``build_callbacks_from_config(cfg)`` so
+        ``training.checkpoint_*`` settings take effect by default. Pass
+        ``callbacks=[]`` to run without callbacks.
         """
         if self.task is None:
             self.task = build_task_from_name(
                 self.cfg.task.name, dict(self.cfg.task.params)
             )
 
-        callbacks = [] if callbacks is None else list(callbacks)
+        if callbacks is None:
+            from .training.callbacks import build_callbacks_from_config
+
+            callbacks = build_callbacks_from_config(self.cfg)
+        else:
+            callbacks = list(callbacks)
 
         model_name = self.cfg.model.name.lower()
         resolved_method = self.cfg.solver.name if method is None else method
@@ -620,6 +632,29 @@ class Emulator:
                     "Reinstall `astro-emulators-toolkit` or verify that its core training packages import correctly."
                 ) from exc
 
+        import dataclasses as _dataclasses
+
+        from .spec import to_json_compatible
+        from .training.paths import append_effective_run_record
+
+        append_effective_run_record(
+            self.cfg.training.workdir,
+            resolved_solver=solver.name,
+            requested_solver=str(resolved_method),
+            optimizer_source=(
+                ("external_override" if self._optimizer_overridden else "config")
+                if solver.name == "gradient"
+                else None
+            ),
+            optim=(
+                to_json_compatible(_dataclasses.asdict(self.cfg.optim))
+                if solver.name == "gradient"
+                else None
+            ),
+            num_steps=self.cfg.training.num_steps,
+            resume=resume,
+        )
+
         result = solver.run(
             cfg=self.cfg,
             model_name=model_name,
@@ -636,6 +671,7 @@ class Emulator:
             resume=resume,
             max_steps=max_steps,
             device_batch_transform=device_batch_transform,
+            external_optimizer=self._optimizer_overridden,
         )
 
         self.params = result.params
@@ -823,7 +859,8 @@ class Emulator:
             f"provenance.toolkit_version={provenance.get('toolkit_version', 'unknown')}",
             f"provenance.python_version={provenance.get('python_version', 'unknown')}",
             f"provenance.created_at={provenance.get('created_at', 'unknown')}",
-            f"provenance.git_commit={provenance.get('git_commit', 'unknown')}",
+            "provenance.working_tree_git_commit="
+            f"{provenance.get('working_tree_git_commit', 'unknown')}",
         ]
         return "\n".join(lines)
 
@@ -906,6 +943,11 @@ class Emulator:
             dirpath=dirpath,
             spec=spec,
             extras=extras,
+            optimizer_source=(
+                "external_override" if self._optimizer_overridden else "config"
+            )
+            if self.last_fit_method == "gradient"
+            else None,
         )
         self.bundle_metadata = metadata
         self.model_family_id = metadata.get("model_family_id", self.model_family_id)

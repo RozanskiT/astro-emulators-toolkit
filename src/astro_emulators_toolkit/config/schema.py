@@ -292,8 +292,10 @@ class OptimConfig:
     lr: float = 1e-3
     lr_scaling: str | None = None  # None | "si" | "mup" | "mup_depth"
     scale_embedding_lr: float = 1.0
-    schedule: str = "constant"  # "constant" | "cosine" | "wsd"
-    warmup_steps: int = 0
+    schedule: str = "cosine"  # "constant" | "cosine" | "wsd"
+    # None means automatic warmup: round(0.1 * training.num_steps) for the
+    # "cosine" and "wsd" schedules. Set 0 to disable warmup explicitly.
+    warmup_steps: int | None = None
     decay_steps: int = 0  # used by "wsd" (warmup-stable-decay)
     weight_decay: float = 0.0
     grad_clip: float = 0.0
@@ -395,12 +397,13 @@ class OptimConfig:
             ),
         )
 
-        warmup_steps = _normalize_int(
-            self.warmup_steps, field_name="optim.warmup_steps"
-        )
-        if warmup_steps < 0:
-            raise ValueError("optim.warmup_steps must be >= 0.")
-        object.__setattr__(self, "warmup_steps", warmup_steps)
+        if self.warmup_steps is not None:
+            warmup_steps = _normalize_int(
+                self.warmup_steps, field_name="optim.warmup_steps"
+            )
+            if warmup_steps < 0:
+                raise ValueError("optim.warmup_steps must be >= 0.")
+            object.__setattr__(self, "warmup_steps", warmup_steps)
 
         decay_steps = _normalize_int(self.decay_steps, field_name="optim.decay_steps")
         if decay_steps < 0:
@@ -439,6 +442,9 @@ class TrainConfig:
     checkpoint_steps: tuple[int, ...] | None = None
     # None means preserve all saved checkpoints
     max_saved_checkpoints: int | None = 5
+    # set False to force synchronous checkpoint writes (useful when bisecting
+    # GPU instability, at the cost of blocking the training loop per save)
+    async_checkpointing: bool = True
 
     # if None: inferred from dataset length (ceil(len / batch_size))
     # used to infer epoch boundaries/metrics while training is step-based

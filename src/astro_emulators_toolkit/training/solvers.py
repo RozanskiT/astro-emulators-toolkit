@@ -61,6 +61,7 @@ def _run_gradient_solver(
     resume,
     max_steps,
     device_batch_transform,
+    external_optimizer=False,
     **_unused,
 ) -> BackendFitResult:
     return fit_with_gradient_backend(
@@ -75,6 +76,7 @@ def _run_gradient_solver(
         resume=resume,
         max_steps=max_steps,
         device_batch_transform=device_batch_transform,
+        external_optimizer=external_optimizer,
     )
 
 
