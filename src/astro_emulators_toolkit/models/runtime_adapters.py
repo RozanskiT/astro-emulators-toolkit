@@ -593,7 +593,21 @@ class CannonRuntimeAdapter(ArrayRuntimeAdapter):
 
 
 @dataclass(frozen=True)
-class TransformerPayneRuntimeAdapter(MinMaxValidatedAdapterMixin):
+class TwoInputSpectralRuntimeAdapter(MinMaxValidatedAdapterMixin):
+    """Shared runtime adapter for explicit-wavelength (parameters + query
+    wavelengths -> spectrum) model families.
+
+    Concrete families set ``family_name`` and the default leaf keys; model
+    specifics (device batch transforms beyond the plain flux transform,
+    extra runtime-contract fields) are added by overriding
+    ``make_device_batch_transform`` / ``describe_runtime``.
+    """
+
+    family_name: str = "two_input_spectral"
+    default_input_leaf_key: str = "parameters"
+    default_wavelength_leaf_key: str = "wavelengths"
+    default_output_leaf_key: str = "flux"
+
     def resolve_init_context(
         self,
         *,
@@ -650,16 +664,19 @@ class TransformerPayneRuntimeAdapter(MinMaxValidatedAdapterMixin):
         output_paths = _section_leaf_paths(spec, "outputs")
         if len(input_paths) != 2:
             raise ValueError(
-                f"transformer_payne requires exactly two input leaves, found {len(input_paths)}."
+                f"{self.family_name} requires exactly two input leaves, found {len(input_paths)}."
             )
         if len(output_paths) != 1:
             raise ValueError(
-                f"transformer_payne requires exactly one output leaf, found {len(output_paths)}."
+                f"{self.family_name} requires exactly one output leaf, found {len(output_paths)}."
             )
 
         wavelength_leaf = _select_wavelength_leaf(input_paths)
-        parameter_leaf = next(path for path in input_paths if path != wavelength_leaf)
-        del parameter_leaf  # derived to confirm resolution is unique
+        parameter_leaves = [path for path in input_paths if path != wavelength_leaf]
+        if len(parameter_leaves) != 1:
+            raise ValueError(
+                f"{self.family_name} requires exactly one non-wavelength parameter leaf."
+            )
 
         channels = int(dict(cfg.model.params).get("channels", 1))
         output_leaf = output_paths[0]
@@ -672,16 +689,16 @@ class TransformerPayneRuntimeAdapter(MinMaxValidatedAdapterMixin):
         if channels == 1:
             if output_channel_names not in (None, []):
                 raise ValueError(
-                    "transformer_payne single-channel outputs must not declare multiple channel names."
+                    f"{self.family_name} single-channel outputs must not declare channel names."
                 )
             return
         if output_channel_names is None:
             raise ValueError(
-                "transformer_payne multi-channel outputs require output channel names metadata."
+                f"{self.family_name} multi-channel outputs require output channel names metadata."
             )
         if len(output_channel_names) != channels:
             raise ValueError(
-                "transformer_payne output channel_names_tree length "
+                f"{self.family_name} output channel_names_tree length "
                 f"({len(output_channel_names)}) must equal channels ({channels})."
             )
 
@@ -690,12 +707,18 @@ class TransformerPayneRuntimeAdapter(MinMaxValidatedAdapterMixin):
         channels = int(dict(cfg.model.params).get("channels", 1))
         out["inputs"] = _merge_iotree_defaults(
             out.get("inputs"),
-            default_structure_tree={"parameters": None, "wavelengths": None},
+            default_structure_tree={
+                self.default_input_leaf_key: None,
+                self.default_wavelength_leaf_key: None,
+            },
         )
         out["outputs"] = _merge_iotree_defaults(
             out.get("outputs"),
-            default_structure_tree={"flux": None},
+            default_structure_tree={self.default_output_leaf_key: None},
         )
+        # Resolve the actual output leaf path before injecting default
+        # channel names: a user-supplied output structure may not use
+        # default_output_leaf_key.
         if channels > 1 and out["outputs"].get("channel_names_tree") is None:
             output_leaf_paths = _section_leaf_paths(out, "outputs")
             if len(output_leaf_paths) == 1:
@@ -724,7 +747,7 @@ class TransformerPayneRuntimeAdapter(MinMaxValidatedAdapterMixin):
 
     def affine_leaf_specs(
         self, *, cfg, spec: dict[str, Any], model_init: dict[str, Any]
-    ) -> dict[str, dict[str, Any]]:
+    ) -> AffineLeafSpecs:
         role_paths = self.derive_role_paths(cfg=cfg, spec=spec)
         channels = int(dict(cfg.model.params).get("channels", 1))
         output_spec = (
@@ -741,6 +764,34 @@ class TransformerPayneRuntimeAdapter(MinMaxValidatedAdapterMixin):
             role_paths["wavelength_leaf"]: {"mode": "scalar_only"},
             role_paths["output_leaf"]: output_spec,
         }
+
+    def make_device_batch_transform(
+        self, *, cfg, spec: dict[str, Any], **kwargs: Any
+    ) -> DeviceBatchTransform:
+        from .transformer_payne_batch import make_flux_batch_transform
+
+        role_paths = self.derive_role_paths(cfg=cfg, spec=spec)
+        kwargs.setdefault("parameter_role_path", role_paths["parameter_leaf"])
+        kwargs.setdefault("wavelength_role_path", role_paths["wavelength_leaf"])
+        kwargs.setdefault("output_role_path", role_paths["output_leaf"])
+        return make_flux_batch_transform(**kwargs)
+
+    def describe_runtime(
+        self, *, cfg, spec: dict[str, Any], model_init: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "surface": "canonical_dict_trees_v1",
+            "role_paths": self.derive_role_paths(cfg=cfg, spec=spec),
+            "affine_leaf_specs": self.affine_leaf_specs(
+                cfg=cfg, spec=spec, model_init=model_init
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class TransformerPayneRuntimeAdapter(TwoInputSpectralRuntimeAdapter):
+    family_name: str = "transformer_payne"
+    default_output_leaf_key: str = "flux"
 
     def make_device_batch_transform(
         self, *, cfg, spec: dict[str, Any], **kwargs: Any
@@ -793,16 +844,10 @@ class TransformerPayneRuntimeAdapter(MinMaxValidatedAdapterMixin):
     def describe_runtime(
         self, *, cfg, spec: dict[str, Any], model_init: dict[str, Any]
     ) -> dict[str, Any]:
-        role_paths = self.derive_role_paths(cfg=cfg, spec=spec)
-        runtime: dict[str, Any] = {
-            "surface": "canonical_dict_trees_v1",
-            "role_paths": role_paths,
-            "affine_leaf_specs": self.affine_leaf_specs(
-                cfg=cfg, spec=spec, model_init=model_init
-            ),
-        }
+        runtime = super().describe_runtime(cfg=cfg, spec=spec, model_init=model_init)
         channels = int(dict(cfg.model.params).get("channels", 1))
         if channels > 1:
+            role_paths = runtime["role_paths"]
             output_channel_names = _metadata_leaf_for_role(
                 spec,
                 section_name="outputs",
