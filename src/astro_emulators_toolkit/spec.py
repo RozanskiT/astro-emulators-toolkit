@@ -7,7 +7,7 @@ from typing import Any, cast
 import numpy as np
 
 from .config.schema import IOTreeSpec, MinMaxTreeSpec, RootConfig
-from .io_trees import validate_minmax_values
+from .io_trees import get_leaf_by_path, validate_minmax_values
 from .resolver import get_model_entry_from_name
 
 
@@ -369,3 +369,105 @@ def format_spec_for_display(
         return [f"{pad}{value}"]
 
     return "\n".join(_fmt(spec, 0))
+
+
+def describe_spec_metadata_presence(section: dict[str, Any] | None) -> str:
+    if section is None:
+        return "none"
+
+    present: list[str] = []
+    if isinstance(section.get("channel_names_tree"), dict):
+        present.append("names")
+    if any(
+        isinstance(section.get(field_name), dict)
+        for field_name in ("leaf_units_tree", "channel_units_tree")
+    ):
+        present.append("units")
+    if any(
+        isinstance(section.get(field_name), dict)
+        for field_name in ("leaf_meanings_tree", "channel_meanings_tree")
+    ):
+        present.append("meanings")
+    return ", ".join(present) if present else "none"
+
+
+def _metadata_leaf(
+    section: dict[str, Any] | None,
+    metadata_tree_name: str,
+    path: str,
+) -> Any:
+    if section is None:
+        return None
+    metadata_tree = section.get(metadata_tree_name)
+    if not isinstance(metadata_tree, dict):
+        return None
+    try:
+        return get_leaf_by_path(metadata_tree, path)
+    except KeyError:
+        return None
+
+
+def _format_domain_number(value: Any) -> str:
+    arr = np.asarray(value)
+    if arr.size != 1:
+        return str(value)
+    scalar = float(arr.reshape(-1)[0])
+    return f"{scalar:g}"
+
+
+def _format_domain_interval(min_value: Any, max_value: Any) -> str:
+    return f"[{_format_domain_number(min_value)}, {_format_domain_number(max_value)}]"
+
+
+def _format_domain_unit(unit: Any) -> str:
+    if unit is None:
+        return ""
+    return f" {unit}"
+
+
+def _domain_channel_units(
+    input_spec: dict[str, Any] | None,
+    path: str,
+    index: int,
+) -> str:
+    channel_units = _metadata_leaf(input_spec, "channel_units_tree", path)
+    if isinstance(channel_units, (list, tuple)) and index < len(channel_units):
+        return _format_domain_unit(channel_units[index])
+    return _format_domain_unit(_metadata_leaf(input_spec, "leaf_units_tree", path))
+
+
+def domain_leaf_lines(
+    path: str,
+    min_value: Any,
+    max_value: Any,
+    *,
+    input_spec: dict[str, Any] | None,
+) -> list[str]:
+    channel_names = _metadata_leaf(input_spec, "channel_names_tree", path)
+    min_arr = np.asarray(min_value)
+    max_arr = np.asarray(max_value)
+    if (
+        isinstance(channel_names, (list, tuple))
+        and min_arr.shape == max_arr.shape
+        and min_arr.ndim >= 1
+        and min_arr.shape[-1] == len(channel_names)
+    ):
+        min_channels = min_arr.reshape(-1, min_arr.shape[-1])[0]
+        max_channels = max_arr.reshape(-1, max_arr.shape[-1])[0]
+        lines = [f"  {path}:"]
+        for idx, name in enumerate(channel_names):
+            interval = _format_domain_interval(min_channels[idx], max_channels[idx])
+            lines.append(
+                f"    {name}: {interval}{_domain_channel_units(input_spec, path, idx)}"
+            )
+        return lines
+
+    unit = _format_domain_unit(_metadata_leaf(input_spec, "leaf_units_tree", path))
+    if min_arr.shape == max_arr.shape and min_arr.ndim == 1 and min_arr.size > 1:
+        lines = [f"  {path}:"]
+        for idx, (min_item, max_item) in enumerate(zip(min_arr, max_arr, strict=True)):
+            lines.append(
+                f"    [{idx}]: {_format_domain_interval(min_item, max_item)}{unit}"
+            )
+        return lines
+    return [f"  {path}: {_format_domain_interval(min_value, max_value)}{unit}"]

@@ -10,9 +10,13 @@ from flax import nnx
 
 from ._typing import PytreeDict
 from .bundle.artifact import load_bundle_artifact, save_bundle_artifact
+from .bundle.loaded_state import (
+    validate_bundle_weights_payload,
+    validate_loaded_runtime_trees_match_initialization,
+    validate_runtime_contract_metadata,
+)
 from .bundle.hub import get_cache_dir, snapshot_download
 from .bundle.metadata import get_bundle_model_init
-from .bundle.versions import WEIGHTS_LAYOUT
 from .config.schema import RootConfig, canonicalize_config_names
 from .emulator_runtime import (
     apply_jax_runtime,
@@ -30,7 +34,11 @@ from .resolver import (
     validate_model_io_compatibility,
 )
 from .io_trees import get_leaf_by_path, iter_leaf_paths, set_leaf_by_path
-from .spec import materialize_effective_spec
+from .spec import (
+    describe_spec_metadata_presence,
+    domain_leaf_lines,
+    materialize_effective_spec,
+)
 from .data.protocols import (
     DeviceBatchTransformLike,
     init_batch_via_device_transform,
@@ -64,142 +72,6 @@ def make_tx(cfg, **kwargs):
     return _make_tx_impl(cfg, **kwargs)
 
 
-def _validate_bundle_weights_payload(
-    metadata: dict[str, Any], params_pure: dict[str, Any]
-) -> None:
-    layout = metadata.get("weights_layout")
-    if layout != WEIGHTS_LAYOUT:
-        raise ValueError(f"Unsupported bundle weights_layout '{layout}'.")
-    required_keys = ("params", "model_state")
-    missing = [key for key in required_keys if key not in params_pure]
-    if missing:
-        raise ValueError(
-            f"weights_layout '{layout}' is missing required weights keys: {missing}."
-        )
-
-
-def _display_tree_path(path: str) -> str:
-    return path or "<root>"
-
-
-def _normalize_tree_keys_for_bundle_validation(
-    tree: Any, *, tree_name: str, path: str = ""
-) -> Any:
-    if not isinstance(tree, dict):
-        return tree
-    normalized: dict[str, Any] = {}
-    for raw_key, value in tree.items():
-        key = str(raw_key)
-        if not key:
-            raise ValueError(
-                f"{tree_name} contains an empty key at '{_display_tree_path(path)}'."
-            )
-        if "/" in key:
-            raise ValueError(
-                f"{tree_name} contains key {raw_key!r} with '/' at '{_display_tree_path(path)}'."
-            )
-        if key in normalized:
-            raise ValueError(
-                f"{tree_name} key collision after string normalization at '{_display_tree_path(path)}': {raw_key!r}."
-            )
-        next_path = f"{path}/{key}" if path else key
-        normalized[key] = _normalize_tree_keys_for_bundle_validation(
-            value, tree_name=tree_name, path=next_path
-        )
-    return normalized
-
-
-def _validate_loaded_tree_matches_initialized(
-    *,
-    initialized_tree: Any,
-    loaded_tree: Any,
-    tree_name: str,
-    path: str = "",
-) -> None:
-    if isinstance(initialized_tree, dict):
-        if not isinstance(loaded_tree, dict):
-            raise ValueError(
-                f"Loaded {tree_name} tree has a leaf at '{_display_tree_path(path)}' "
-                f"where the initialized {tree_name} tree has a subtree."
-            )
-        initialized_keys = set(initialized_tree)
-        loaded_keys = set(loaded_tree)
-        if initialized_keys != loaded_keys:
-            missing = sorted(initialized_keys - loaded_keys)
-            extra = sorted(loaded_keys - initialized_keys)
-            detail: list[str] = []
-            if missing:
-                detail.append(f"missing keys={missing}")
-            if extra:
-                detail.append(f"extra keys={extra}")
-            raise ValueError(
-                f"Loaded {tree_name} tree structure mismatch at '{_display_tree_path(path)}': {', '.join(detail)}."
-            )
-        for key in sorted(initialized_keys):
-            next_path = f"{path}/{key}" if path else key
-            _validate_loaded_tree_matches_initialized(
-                initialized_tree=initialized_tree[key],
-                loaded_tree=loaded_tree[key],
-                tree_name=tree_name,
-                path=next_path,
-            )
-        return
-    if isinstance(loaded_tree, dict):
-        raise ValueError(
-            f"Loaded {tree_name} tree has a subtree at '{_display_tree_path(path)}' "
-            f"where the initialized {tree_name} tree has a leaf."
-        )
-
-    initialized_arr = np.asarray(initialized_tree)
-    loaded_arr = np.asarray(loaded_tree)
-    initialized_shape = tuple(int(dim) for dim in initialized_arr.shape)
-    loaded_shape = tuple(int(dim) for dim in loaded_arr.shape)
-    if initialized_shape != loaded_shape:
-        raise ValueError(
-            f"Loaded {tree_name} leaf '{_display_tree_path(path)}' has shape "
-            f"{loaded_shape}, expected {initialized_shape}."
-        )
-    initialized_dtype = np.dtype(initialized_arr.dtype)
-    loaded_dtype = np.dtype(loaded_arr.dtype)
-    if initialized_dtype != loaded_dtype:
-        raise ValueError(
-            f"Loaded {tree_name} leaf '{_display_tree_path(path)}' has dtype "
-            f"{loaded_dtype}, expected {initialized_dtype}."
-        )
-
-
-def _validate_loaded_runtime_trees_match_initialization(
-    *,
-    initialized_params: PytreeDict,
-    loaded_params: PytreeDict,
-    initialized_model_state: PytreeDict,
-    loaded_model_state: PytreeDict,
-) -> None:
-    normalized_initialized_params = _normalize_tree_keys_for_bundle_validation(
-        initialized_params, tree_name="initialized parameter tree"
-    )
-    normalized_loaded_params = _normalize_tree_keys_for_bundle_validation(
-        loaded_params, tree_name="loaded parameter tree"
-    )
-    _validate_loaded_tree_matches_initialized(
-        initialized_tree=normalized_initialized_params,
-        loaded_tree=normalized_loaded_params,
-        tree_name="parameter",
-    )
-
-    normalized_initialized_model_state = _normalize_tree_keys_for_bundle_validation(
-        initialized_model_state, tree_name="initialized model_state tree"
-    )
-    normalized_loaded_model_state = _normalize_tree_keys_for_bundle_validation(
-        loaded_model_state, tree_name="loaded model_state tree"
-    )
-    _validate_loaded_tree_matches_initialized(
-        initialized_tree=normalized_initialized_model_state,
-        loaded_tree=normalized_loaded_model_state,
-        tree_name="model_state",
-    )
-
-
 def _extract_init_example(init_example: dict[str, Any]) -> tuple[Any, Any | None]:
     if not isinstance(init_example, dict):
         raise TypeError(
@@ -231,150 +103,9 @@ def _expand_scalar_target_leaf_for_init(outputs: Any) -> Any:
     return outputs
 
 
-def _validate_runtime_contract_metadata(
-    metadata: dict[str, Any], *, cfg: RootConfig, model_init: dict[str, Any]
-) -> None:
-    runtime_contract = metadata.get("runtime_contract")
-    if runtime_contract is None:
-        return
-    if not isinstance(runtime_contract, dict):
-        raise ValueError(
-            "Bundle metadata field 'runtime_contract' must be a dictionary when present."
-        )
-    new_required_keys = ("surface", "role_paths", "affine_leaf_specs")
-    missing_new = [key for key in new_required_keys if key not in runtime_contract]
-    if missing_new:
-        raise ValueError(
-            f"Bundle metadata field 'runtime_contract' is missing required keys: {missing_new}."
-        )
-    if not isinstance(runtime_contract.get("role_paths"), dict):
-        raise ValueError(
-            "Bundle metadata field 'runtime_contract.role_paths' must be a dictionary."
-        )
-    if "affine_leaf_specs" in runtime_contract and not isinstance(
-        runtime_contract.get("affine_leaf_specs"), dict
-    ):
-        raise ValueError(
-            "Bundle metadata field 'runtime_contract.affine_leaf_specs' must be a dictionary."
-        )
-
-    entry = get_model_entry_from_name(cfg.model.name)
-    if entry is None or entry.runtime is None:
-        return
-    expected = entry.runtime.describe_runtime(
-        cfg=cfg, spec=metadata["spec"], model_init=model_init
-    )
-    if runtime_contract != expected:
-        raise ValueError(
-            "Bundle metadata runtime_contract does not match the resolved model family runtime contract."
-        )
-
-
 def _spec_block(spec: dict[str, Any], field_name: str) -> dict[str, Any] | None:
     block = spec.get(field_name)
     return block if isinstance(block, dict) else None
-
-
-def _describe_spec_metadata_presence(section: dict[str, Any] | None) -> str:
-    if section is None:
-        return "none"
-
-    present: list[str] = []
-    if isinstance(section.get("channel_names_tree"), dict):
-        present.append("names")
-    if any(
-        isinstance(section.get(field_name), dict)
-        for field_name in ("leaf_units_tree", "channel_units_tree")
-    ):
-        present.append("units")
-    if any(
-        isinstance(section.get(field_name), dict)
-        for field_name in ("leaf_meanings_tree", "channel_meanings_tree")
-    ):
-        present.append("meanings")
-    return ", ".join(present) if present else "none"
-
-
-def _metadata_leaf(
-    section: dict[str, Any] | None,
-    metadata_tree_name: str,
-    path: str,
-) -> Any:
-    if section is None:
-        return None
-    metadata_tree = section.get(metadata_tree_name)
-    if not isinstance(metadata_tree, dict):
-        return None
-    try:
-        return get_leaf_by_path(metadata_tree, path)
-    except KeyError:
-        return None
-
-
-def _format_domain_number(value: Any) -> str:
-    arr = np.asarray(value)
-    if arr.size != 1:
-        return str(value)
-    scalar = float(arr.reshape(-1)[0])
-    return f"{scalar:g}"
-
-
-def _format_domain_interval(min_value: Any, max_value: Any) -> str:
-    return f"[{_format_domain_number(min_value)}, {_format_domain_number(max_value)}]"
-
-
-def _format_domain_unit(unit: Any) -> str:
-    if unit is None:
-        return ""
-    return f" {unit}"
-
-
-def _domain_channel_units(
-    input_spec: dict[str, Any] | None,
-    path: str,
-    index: int,
-) -> str:
-    channel_units = _metadata_leaf(input_spec, "channel_units_tree", path)
-    if isinstance(channel_units, (list, tuple)) and index < len(channel_units):
-        return _format_domain_unit(channel_units[index])
-    return _format_domain_unit(_metadata_leaf(input_spec, "leaf_units_tree", path))
-
-
-def _domain_leaf_lines(
-    path: str,
-    min_value: Any,
-    max_value: Any,
-    *,
-    input_spec: dict[str, Any] | None,
-) -> list[str]:
-    channel_names = _metadata_leaf(input_spec, "channel_names_tree", path)
-    min_arr = np.asarray(min_value)
-    max_arr = np.asarray(max_value)
-    if (
-        isinstance(channel_names, (list, tuple))
-        and min_arr.shape == max_arr.shape
-        and min_arr.ndim >= 1
-        and min_arr.shape[-1] == len(channel_names)
-    ):
-        min_channels = min_arr.reshape(-1, min_arr.shape[-1])[0]
-        max_channels = max_arr.reshape(-1, max_arr.shape[-1])[0]
-        lines = [f"  {path}:"]
-        for idx, name in enumerate(channel_names):
-            interval = _format_domain_interval(min_channels[idx], max_channels[idx])
-            lines.append(
-                f"    {name}: {interval}{_domain_channel_units(input_spec, path, idx)}"
-            )
-        return lines
-
-    unit = _format_domain_unit(_metadata_leaf(input_spec, "leaf_units_tree", path))
-    if min_arr.shape == max_arr.shape and min_arr.ndim == 1 and min_arr.size > 1:
-        lines = [f"  {path}:"]
-        for idx, (min_item, max_item) in enumerate(zip(min_arr, max_arr, strict=True)):
-            lines.append(
-                f"    [{idx}]: {_format_domain_interval(min_item, max_item)}{unit}"
-            )
-        return lines
-    return [f"  {path}: {_format_domain_interval(min_value, max_value)}{unit}"]
 
 
 def _validate_public_batched_input_tree(x: dict[str, Any], *, field_name: str) -> None:
@@ -854,7 +585,7 @@ class Emulator:
                     lines.append(f"  {path}: max_tree missing")
                     continue
                 lines.extend(
-                    _domain_leaf_lines(
+                    domain_leaf_lines(
                         path,
                         min_value,
                         max_value,
@@ -907,8 +638,8 @@ class Emulator:
             f"role_paths={runtime_contract.get('role_paths', {})}",
             f"reference_scaling_inputs={'present' if spec.get('reference_scaling_inputs') is not None else 'absent'}",
             f"reference_scaling_outputs={'present' if spec.get('reference_scaling_outputs') is not None else 'absent'}",
-            f"input_metadata={_describe_spec_metadata_presence(self.input_spec)}",
-            f"output_metadata={_describe_spec_metadata_presence(self.output_spec)}",
+            f"input_metadata={describe_spec_metadata_presence(self.input_spec)}",
+            f"output_metadata={describe_spec_metadata_presence(self.output_spec)}",
             self.describe_domain(),
             f"provenance.toolkit_version={provenance.get('toolkit_version', 'unknown')}",
             f"provenance.python_version={provenance.get('python_version', 'unknown')}",
@@ -1017,8 +748,8 @@ class Emulator:
         bundle_dir, loaded = load_bundle_artifact(dirpath)
         resolved_cfg = loaded.cfg
         model_init = get_bundle_model_init(loaded.metadata, cfg=resolved_cfg)
-        _validate_bundle_weights_payload(loaded.metadata, loaded.params_pure)
-        _validate_runtime_contract_metadata(
+        validate_bundle_weights_payload(loaded.metadata, loaded.params_pure)
+        validate_runtime_contract_metadata(
             loaded.metadata, cfg=resolved_cfg, model_init=model_init
         )
 
@@ -1040,7 +771,7 @@ class Emulator:
         loaded_model_state = validate_model_state_dict(
             loaded.params_pure.get("model_state", {})
         )
-        _validate_loaded_runtime_trees_match_initialization(
+        validate_loaded_runtime_trees_match_initialization(
             initialized_params=cast(PytreeDict, emu.params),
             loaded_params=cast(PytreeDict, loaded.params_pure["params"]),
             initialized_model_state=cast(PytreeDict, emu.model_state),
