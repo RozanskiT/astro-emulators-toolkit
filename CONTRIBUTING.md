@@ -29,6 +29,11 @@ This project is currently maintained by one primary developer and this documenta
 - Merge only when the branch is coherent: tests are appropriate for the change,
   docs are aligned, and any public-surface or bundle-compatibility impact is
   named explicitly.
+- Deferred, intentionally-not-yet-done work is tracked in
+  [`BACKLOG.md`](BACKLOG.md). When a change consciously defers something
+  (a rename, a schema removal, an upstream fix), record it there with the
+  reason and what doing it properly requires, rather than leaving it in code
+  comments or PR text.
 
 ## Feature branch checklist
 
