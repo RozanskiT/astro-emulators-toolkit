@@ -3,12 +3,14 @@
 Data: irregular_intensity split into train/validation from same distribution.
 Creates: examples/runs/advanced_transformer_payne_intensity/bundle.
 Runtime: ~20-40s on CPU.
+
+Explicit logging/evaluation/checkpoint step schedules are demonstrated in
+examples/advanced/05_training_internals.py.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -36,37 +38,16 @@ def main() -> None:
         "examples/runs/advanced_transformer_payne_intensity",
         smoke="examples/runs/advanced_transformer_payne_intensity_smoke",
     )
+    profile = "smoke"
     cfg = transformer_payne_intensity(
         channels=2,
         workdir=workdir,
-        profile="smoke",
-    )
-    explicit_logging_steps = tuple(
-        step for step in (1, 2, 4, 8, 16, 32) if step <= int(cfg.training.num_steps)
-    )
-    explicit_evaluation_steps = tuple(
-        step for step in (2, 4, 8, 16, 32) if step <= int(cfg.training.num_steps)
-    )
-    explicit_checkpoint_steps = tuple(
-        step for step in (2, 8, 16, 32) if step <= int(cfg.training.num_steps)
-    )
-    logging_interval_steps = 3
-    evaluation_interval_steps = 3
-    checkpoint_interval_steps = 3
-    cfg = cfg.with_updates(
-        training=replace(
-            cfg.training,
-            logging_interval_steps=logging_interval_steps,
-            evaluation_interval_steps=evaluation_interval_steps,
-            logging_steps=explicit_logging_steps,
-            evaluation_steps=explicit_evaluation_steps,
-            checkpoint_interval_steps=checkpoint_interval_steps,
-            checkpoint_steps=explicit_checkpoint_steps,
-            max_saved_checkpoints=None,
-        )
+        profile=profile,
     )
     channel_names = tuple(cfg.io.outputs.channel_names_tree["flux"])
 
+    # The two intensity channels live on different source grids; the device
+    # batch transform interpolates both onto shared query wavelengths.
     n_eval_wave = 32
     eval_wave = np.linspace(
         max(wave_lines[0], wave_cont[0]),
@@ -85,41 +66,16 @@ def main() -> None:
     history = emu.fit(
         TreeArrayDataset(x=x_train, y=y_train),
         validation_dataset=TreeArrayDataset(x=x_val, y=y_val),
-        device_batch_transform=transform
+        device_batch_transform=transform,
     )
-    checkpoint_dir = Path(cfg.training.workdir) / "checkpoints"
-    recorded_checkpoint_steps = tuple(
-        sorted(
-            int(path.name)
-            for path in checkpoint_dir.iterdir()
-            if path.is_dir()
-            and path.name.isdigit()
-            and int(path.name) <= int(cfg.training.num_steps)
-        )
-    )
+
     inference_wave = np.broadcast_to(eval_wave[None, :], (2, n_eval_wave))
     pred = emu.make_frozen_apply(jit=False)(
         {"parameters": x_val["parameters"][:2], "wavelengths": inference_wave}
     )["flux"]
     bundle_dir = emu.save_bundle()
     print("Logged steps:", len(history.logs.get("training_loss", [])))
-    print("Preset profile:", "smoke")
-    print("Periodic training log interval:", cfg.training.logging_interval_steps)
-    print("Periodic validation interval:", cfg.training.evaluation_interval_steps)
-    print("Periodic checkpoint interval:", cfg.training.checkpoint_interval_steps)
-    print("Explicit training log steps:", cfg.training.logging_steps)
-    print("Explicit validation steps:", cfg.training.evaluation_steps)
-    print("Explicit checkpoint steps:", cfg.training.checkpoint_steps)
-    print("Max saved checkpoints:", cfg.training.max_saved_checkpoints)
-    print(
-        "Recorded training steps:",
-        tuple(int(step) for step in history.logs.get("training_step", ())),
-    )
-    print(
-        "Recorded validation steps:",
-        tuple(int(step) for step in history.logs.get("validation_step", ())),
-    )
-    print("Recorded checkpoint steps:", recorded_checkpoint_steps)
+    print("Preset profile:", profile)
     print("Pred shape:", pred.shape)
     print("Output channels:", channel_names)
     print("Saved bundle:", bundle_dir)
