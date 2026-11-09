@@ -157,7 +157,11 @@ def test_make_tx_accepts_schedule_for_all_builtin_optimizers():
 def test_make_tx_applies_global_grad_clip_before_optimizer():
     params = {"w": jnp.zeros((2,), dtype=jnp.float32)}
     grads = {"w": jnp.asarray([3.0, 4.0], dtype=jnp.float32)}
-    cfg = RootConfig(optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, grad_clip=1.0, schedule="constant"))
+    cfg = RootConfig(
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, grad_clip=1.0, schedule="constant"
+        )
+    )
 
     tx = make_tx(cfg)
     updates, _ = tx.update(grads, tx.init(params), params)
@@ -176,7 +180,9 @@ def test_make_tx_lr_scaling_none_keeps_single_shared_lr_without_params():
         "head": {"proj0": {"w": jnp.ones((4, 4), dtype=jnp.float32)}},
     }
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
-    cfg = RootConfig(optim=OptimConfig(name="sgd", lr=0.25, b1=0.0, schedule="constant"))
+    cfg = RootConfig(
+        optim=OptimConfig(name="sgd", lr=0.25, b1=0.0, schedule="constant")
+    )
 
     tx = make_tx(cfg)
     updates, _ = tx.update(grads, tx.init(params), params)
@@ -257,12 +263,14 @@ def test_make_tx_transformer_payne_si_scales_only_embedding_groups():
     }
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
     cfg = RootConfig(
-        model=ModelSpec(
-            name="transformer_payne", params={"dim": 8, "no_layers": 2}
-        ),
+        model=ModelSpec(name="transformer_payne", params={"dim": 8, "no_layers": 2}),
         optim=OptimConfig(
-            name="sgd", lr=1.0, b1=0.0, lr_scaling="si", scale_embedding_lr=0.25,
-            schedule="constant"
+            name="sgd",
+            lr=1.0,
+            b1=0.0,
+            lr_scaling="si",
+            scale_embedding_lr=0.25,
+            schedule="constant",
         ),
     )
 
@@ -309,7 +317,9 @@ def test_make_tx_transformer_payne_mup_depth_scales_attention_and_ff_by_depth():
                 "reference_depth": 2,
             },
         ),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup_depth", schedule="constant"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup_depth", schedule="constant"
+        ),
     )
 
     tx = make_tx(cfg, params=params)
@@ -333,7 +343,9 @@ def test_make_tx_transformer_payne_mup_uses_model_config_defaults():
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
     cfg = RootConfig(
         model=ModelSpec(name="transformer_payne", params={"reference_width": 64}),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"
+        ),
     )
 
     tx = make_tx(cfg, params=params)
@@ -389,7 +401,9 @@ def test_make_tx_mlp_mup_scales_kernels_and_leaves_biases_at_base_lr():
             name="mlp",
             params={"hidden_sizes": (8, 8), "reference_width": 4},
         ),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"
+        ),
     )
 
     tx = make_tx(cfg, params=params)
@@ -407,7 +421,9 @@ def test_make_tx_mlp_mup_uses_default_hidden_width():
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
     cfg = RootConfig(
         model=ModelSpec(name="mlp", params={"reference_width": 128}),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"
+        ),
     )
 
     tx = make_tx(cfg, params=params)

@@ -65,9 +65,7 @@ def test_flux_transform_passthrough_allows_missing_eval_grid():
     # n_wavelength != len(wavelength_grid) requires an eval grid in "grid"
     # mode but not in "passthrough" mode.
     with pytest.raises(ValueError, match="Evaluation wavelength grid"):
-        TransformerPayneFluxDeviceBatchTransform(
-            wavelength_grid=wave, n_wavelength=8
-        )
+        TransformerPayneFluxDeviceBatchTransform(wavelength_grid=wave, n_wavelength=8)
     TransformerPayneFluxDeviceBatchTransform(
         wavelength_grid=wave, n_wavelength=8, eval_mode="passthrough"
     )

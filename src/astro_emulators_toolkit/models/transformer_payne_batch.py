@@ -236,7 +236,9 @@ class TransformerPayneFluxDeviceBatchTransform:
                 "set allow_extrapolation=True to override."
             )
 
-        eval_mode = _validate_eval_mode(self.eval_mode, context_name=type(self).__name__)
+        eval_mode = _validate_eval_mode(
+            self.eval_mode, context_name=type(self).__name__
+        )
         object.__setattr__(self, "eval_mode", eval_mode)
 
         eval_grid: jax.Array | None
@@ -262,9 +264,7 @@ class TransformerPayneFluxDeviceBatchTransform:
                 )
             _validate_strictly_increasing(name="eval_wavelength_grid", wave=eval_grid)
             if float(eval_grid[0]) < min_wv or float(eval_grid[-1]) > max_wv:
-                raise ValueError(
-                    "eval_wavelength_grid must lie inside [min_w, max_w]."
-                )
+                raise ValueError("eval_wavelength_grid must lie inside [min_w, max_w].")
 
         object.__setattr__(self, "_jdtype", jdtype)
         object.__setattr__(self, "_wave_dtype", wave_dtype)
@@ -427,7 +427,9 @@ class TransformerPayneIntensityDeviceBatchTransform:
                     f"Expected {tuple(self.expected_channel_dataset_keys)}, got {tuple(output_order)}."
                 )
 
-        eval_mode = _validate_eval_mode(self.eval_mode, context_name=type(self).__name__)
+        eval_mode = _validate_eval_mode(
+            self.eval_mode, context_name=type(self).__name__
+        )
         object.__setattr__(self, "eval_mode", eval_mode)
 
         eval_grid: jax.Array | None
@@ -472,8 +474,7 @@ class TransformerPayneIntensityDeviceBatchTransform:
             eval_grid is not None
             and not self.allow_eval_outside_overlap
             and (
-                float(eval_grid[0]) < overlap_min
-                or float(eval_grid[-1]) > overlap_max
+                float(eval_grid[0]) < overlap_min or float(eval_grid[-1]) > overlap_max
             )
         ):
             raise ValueError(

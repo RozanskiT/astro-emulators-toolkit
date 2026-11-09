@@ -44,12 +44,10 @@ def main() -> None:
         TreeArrayDataset(x=normalize_tree(x_train, min_tree, max_tree), y=y_train),
         validation_dataset=TreeArrayDataset(
             x=normalize_tree(x_val, min_tree, max_tree), y=y_val
-        )
+        ),
     )
 
-    x_pred = normalize_tree(
-        {"parameters": x_val["parameters"][:2]}, min_tree, max_tree
-    )
+    x_pred = normalize_tree({"parameters": x_val["parameters"][:2]}, min_tree, max_tree)
     pred = emu.predict(x_pred)["flux"]
     bundle = emu.save_bundle(
         spec={

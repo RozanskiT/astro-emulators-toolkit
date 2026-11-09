@@ -503,9 +503,7 @@ class TrainConfig:
             object.__setattr__(self, "checkpoint_best_metric", metric)
         mode = str(self.checkpoint_best_mode).strip().lower()
         if mode not in {"min", "max"}:
-            raise ValueError(
-                "training.checkpoint_best_mode must be 'min' or 'max'."
-            )
+            raise ValueError("training.checkpoint_best_mode must be 'min' or 'max'.")
         object.__setattr__(self, "checkpoint_best_mode", mode)
 
         shuffle_seed = _normalize_int(

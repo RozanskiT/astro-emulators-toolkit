@@ -70,9 +70,7 @@ def test_migration_chain_upgrades_supported_older_versions(monkeypatch):
         return metadata
 
     monkeypatch.setattr(versions, "BUNDLE_FORMAT_VERSION", 2)
-    monkeypatch.setattr(
-        versions, "SUPPORTED_BUNDLE_FORMAT_VERSIONS", frozenset({1, 2})
-    )
+    monkeypatch.setattr(versions, "SUPPORTED_BUNDLE_FORMAT_VERSIONS", frozenset({1, 2}))
     monkeypatch.setattr(versions, "BUNDLE_METADATA_MIGRATIONS", {1: _v1_to_v2})
 
     header = _minimal_header()
@@ -86,9 +84,7 @@ def test_migration_chain_upgrades_supported_older_versions(monkeypatch):
 
 def test_supported_version_without_migration_is_a_loud_toolkit_bug(monkeypatch):
     monkeypatch.setattr(versions, "BUNDLE_FORMAT_VERSION", 2)
-    monkeypatch.setattr(
-        versions, "SUPPORTED_BUNDLE_FORMAT_VERSIONS", frozenset({1, 2})
-    )
+    monkeypatch.setattr(versions, "SUPPORTED_BUNDLE_FORMAT_VERSIONS", frozenset({1, 2}))
     monkeypatch.setattr(versions, "BUNDLE_METADATA_MIGRATIONS", {})
 
     header = _minimal_header()
@@ -100,9 +96,7 @@ def test_supported_version_without_migration_is_a_loud_toolkit_bug(monkeypatch):
 
 def test_migration_must_advance_version(monkeypatch):
     monkeypatch.setattr(versions, "BUNDLE_FORMAT_VERSION", 2)
-    monkeypatch.setattr(
-        versions, "SUPPORTED_BUNDLE_FORMAT_VERSIONS", frozenset({1, 2})
-    )
+    monkeypatch.setattr(versions, "SUPPORTED_BUNDLE_FORMAT_VERSIONS", frozenset({1, 2}))
     monkeypatch.setattr(
         versions, "BUNDLE_METADATA_MIGRATIONS", {1: lambda metadata: metadata}
     )

@@ -107,9 +107,7 @@ def _run_fit(tmp_path, monkeypatch, *, callbacks, task, num_steps: int = 3):
     return cfg
 
 
-def test_best_checkpoint_keeps_the_best_eval_step_not_the_last(
-    tmp_path, monkeypatch
-):
+def test_best_checkpoint_keeps_the_best_eval_step_not_the_last(tmp_path, monkeypatch):
     task = _ScheduledEvalTask([1.0, 0.5, 0.8])
     cfg = _run_fit(
         tmp_path,
@@ -211,9 +209,9 @@ def test_emulator_fit_then_load_best_checkpoint_roundtrip(tmp_path):
     emu.load_best_checkpoint()
     assert emu.params is not None
     # Best checkpoint restores a valid parameter tree with the same structure.
-    assert jax.tree_util.tree_structure(
-        emu.params
-    ) == jax.tree_util.tree_structure(params_after_fit)
+    assert jax.tree_util.tree_structure(emu.params) == jax.tree_util.tree_structure(
+        params_after_fit
+    )
 
 
 def test_load_best_checkpoint_errors_when_never_tracked(tmp_path):
@@ -241,6 +239,7 @@ def test_load_best_checkpoint_errors_when_never_tracked(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="No best checkpoint"):
         emu.load_best_checkpoint()
+
 
 def test_best_model_checkpoint_accepts_validation_prefixed_monitor():
     # History keys are "validation_"-prefixed while eval metrics are bare;

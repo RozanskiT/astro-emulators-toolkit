@@ -308,6 +308,4 @@ def test_downgrade_resolution_warns_when_kernel_dominates_short_spectrum():
     long_grid = np.linspace(3.0, 3.5, 20_000)
     with _warnings.catch_warnings():
         _warnings.simplefilter("error")
-        _spectral_resolution_kernel(
-            long_grid, resolution=30_000.0, window_size=4.0
-        )
+        _spectral_resolution_kernel(long_grid, resolution=30_000.0, window_size=4.0)

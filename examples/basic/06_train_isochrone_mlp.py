@@ -33,7 +33,7 @@ def main() -> None:
     emu = Emulator.from_config(cfg)
     history = emu.fit(
         TreeArrayDataset(x=x_train, y=y_train),
-        validation_dataset=TreeArrayDataset(x=x_val, y=y_val)
+        validation_dataset=TreeArrayDataset(x=x_val, y=y_val),
     )
     pred = emu.predict({"parameters": x_val["parameters"][:4]})["targets"]
     bundle_dir = emu.save_bundle()

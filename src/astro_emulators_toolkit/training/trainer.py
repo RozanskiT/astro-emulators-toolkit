@@ -424,7 +424,11 @@ def fit(
                 ):
                     if all(
                         hasattr(task, n)
-                        for n in ("init_eval_state", "update_eval_state", "finalize_eval")
+                        for n in (
+                            "init_eval_state",
+                            "update_eval_state",
+                            "finalize_eval",
+                        )
                     ):
                         eval_state = task.init_eval_state()
                         for vb_np in val_loader.iter_eval_batches():

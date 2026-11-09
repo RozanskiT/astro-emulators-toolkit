@@ -126,7 +126,9 @@ def test_make_tx_mlp_mup_scales_wrapped_kernels():
         model=ModelSpec(
             name="mlp", params={"hidden_sizes": (8,), "reference_width": 4}
         ),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"
+        ),
     )
 
     tx = make_tx(cfg, params=params)
@@ -159,7 +161,9 @@ def test_emulator_from_config_mlp_mup_produces_scaled_groups(tmp_path):
             params={"hidden_sizes": (8, 8), "activation": "tanh", "reference_width": 4},
         ),
         task=TaskSpec(name="regression", params={"loss": "mse"}),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"
+        ),
         training=TrainConfig(workdir=str(tmp_path / "mlp"), batch_size=4, num_steps=1),
     )
     emu = Emulator.from_config(cfg)
@@ -228,7 +232,6 @@ def test_emulator_from_config_transformer_payne_mup_produces_scaled_groups(tmp_p
     grads = jax.tree_util.tree_map(jnp.ones_like, emu.params)
     updates, _ = tx.update(grads, tx.init(emu.params), emu.params)
     update_magnitudes = {
-        float(jnp.max(jnp.abs(leaf)))
-        for leaf in jax.tree_util.tree_leaves(updates)
+        float(jnp.max(jnp.abs(leaf))) for leaf in jax.tree_util.tree_leaves(updates)
     }
     assert len(update_magnitudes) > 1

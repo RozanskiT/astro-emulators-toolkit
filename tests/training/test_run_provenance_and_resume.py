@@ -300,9 +300,7 @@ def test_emulator_fit_records_external_optimizer_override(monkeypatch, tmp_path)
 
     emu.fit(_Dataset(), callbacks=[])
 
-    record = json.loads(
-        (workdir / EFFECTIVE_RUNS_FILENAME).read_text().splitlines()[0]
-    )
+    record = json.loads((workdir / EFFECTIVE_RUNS_FILENAME).read_text().splitlines()[0])
     assert record["optimizer_source"] == "external_override"
 
 

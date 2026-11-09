@@ -42,7 +42,7 @@ def main() -> None:
     history = emu.fit(
         TreeArrayDataset(x=x_train, y=y_train),
         validation_dataset=TreeArrayDataset(x=x_val, y=y_val),
-        device_batch_transform=transform
+        device_batch_transform=transform,
     )
 
     inference_wave = np.broadcast_to(wave[None, :], (2, wave.shape[0]))
