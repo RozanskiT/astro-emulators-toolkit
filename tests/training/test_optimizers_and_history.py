@@ -28,9 +28,12 @@ def _schedule_value(schedule, step: int) -> float:
         ("wsd", 2, 0),
     ],
 )
-def test_decay_schedules_reach_zero_on_last_step(
+def test_decay_schedules_apply_positive_lr_on_every_step_and_zero_after(
     schedule_name: str, warmup_steps: int, decay_steps: int
 ):
+    # Trainer step k applies schedule(k-1), so counts 0 .. num_steps-1 are the
+    # applied learning rates: all must be strictly positive (no wasted steps).
+    # The schedule reaches zero only at count num_steps, which is never applied.
     num_steps = 10
     cfg = RootConfig(
         optim=OptimConfig(
@@ -43,7 +46,23 @@ def test_decay_schedules_reach_zero_on_last_step(
     )
     schedule = make_learning_rate(cfg)
 
-    assert _schedule_value(schedule, num_steps - 1) == pytest.approx(0.0)
+    applied = [_schedule_value(schedule, count) for count in range(num_steps)]
+    assert all(value > 0.0 for value in applied)
+    assert _schedule_value(schedule, num_steps) == pytest.approx(0.0)
+
+
+def test_cosine_warmup_ramp_starts_at_fraction_of_peak():
+    cfg = RootConfig(
+        optim=OptimConfig(schedule="cosine", lr=1.0, warmup_steps=4),
+        training=TrainConfig(num_steps=20),
+    )
+    schedule = make_learning_rate(cfg)
+
+    assert _schedule_value(schedule, 0) == pytest.approx(0.25)
+    assert _schedule_value(schedule, 1) == pytest.approx(0.5)
+    assert _schedule_value(schedule, 2) == pytest.approx(0.75)
+    assert _schedule_value(schedule, 3) == pytest.approx(1.0)
+    assert _schedule_value(schedule, 4) == pytest.approx(1.0)  # cosine peak
 
 
 def test_history_records_train_and_validation_steps_separately():
@@ -60,8 +79,24 @@ def test_history_records_train_and_validation_steps_separately():
     assert history.logs["validation_loss"] == [0.9]
 
 
-def test_make_learning_rate_constant_is_default_scalar():
-    cfg = RootConfig()
+def test_default_schedule_is_linear_warmup_plus_cosine_decay():
+    # The library default is cosine decay with automatic linear warmup over
+    # the first 10% of training.num_steps.
+    cfg = RootConfig(training=TrainConfig(num_steps=1000))
+
+    lr = make_learning_rate(cfg)
+
+    assert callable(lr)
+    peak = float(cfg.optim.lr)
+    assert float(lr(0)) == pytest.approx(peak / 100.0)  # warmup step 1 of 100
+    assert float(lr(50)) == pytest.approx(peak * 51.0 / 100.0)
+    assert float(lr(100)) == pytest.approx(peak)  # cosine peak after warmup
+    assert 0.0 < float(lr(999)) < 0.01 * peak
+    assert float(lr(1000)) == pytest.approx(0.0)
+
+
+def test_make_learning_rate_constant_schedule_is_scalar():
+    cfg = RootConfig(optim=OptimConfig(schedule="constant"))
 
     lr = make_learning_rate(cfg)
 
@@ -78,9 +113,11 @@ def test_make_learning_rate_cosine_with_warmup_shape():
     lr = make_learning_rate(cfg)
 
     assert callable(lr)
-    assert float(lr(0)) == pytest.approx(0.0)
+    assert float(lr(0)) == pytest.approx(0.5)
     assert float(lr(2)) == pytest.approx(1.0)
     assert float(lr(9)) < 0.1
+    assert float(lr(9)) > 0.0
+    assert float(lr(10)) == pytest.approx(0.0)
 
 
 def test_make_learning_rate_wsd_warmup_stable_decay_shape():
@@ -92,11 +129,11 @@ def test_make_learning_rate_wsd_warmup_stable_decay_shape():
     lr = make_learning_rate(cfg)
 
     assert callable(lr)
-    assert float(lr(0)) == pytest.approx(0.0)
+    assert float(lr(0)) == pytest.approx(0.5)
     assert float(lr(2)) == pytest.approx(1.0)
     assert float(lr(5)) == pytest.approx(1.0)
-    assert float(lr(8)) < 0.8
-    assert float(lr(9)) < 0.5
+    assert float(lr(8)) == pytest.approx(2.0 / 3.0)
+    assert float(lr(9)) == pytest.approx(1.0 / 3.0)
     assert float(lr(10)) == pytest.approx(0.0)
 
 
@@ -120,7 +157,11 @@ def test_make_tx_accepts_schedule_for_all_builtin_optimizers():
 def test_make_tx_applies_global_grad_clip_before_optimizer():
     params = {"w": jnp.zeros((2,), dtype=jnp.float32)}
     grads = {"w": jnp.asarray([3.0, 4.0], dtype=jnp.float32)}
-    cfg = RootConfig(optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, grad_clip=1.0))
+    cfg = RootConfig(
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, grad_clip=1.0, schedule="constant"
+        )
+    )
 
     tx = make_tx(cfg)
     updates, _ = tx.update(grads, tx.init(params), params)
@@ -139,7 +180,9 @@ def test_make_tx_lr_scaling_none_keeps_single_shared_lr_without_params():
         "head": {"proj0": {"w": jnp.ones((4, 4), dtype=jnp.float32)}},
     }
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
-    cfg = RootConfig(optim=OptimConfig(name="sgd", lr=0.25, b1=0.0))
+    cfg = RootConfig(
+        optim=OptimConfig(name="sgd", lr=0.25, b1=0.0, schedule="constant")
+    )
 
     tx = make_tx(cfg)
     updates, _ = tx.update(grads, tx.init(params), params)
@@ -188,6 +231,7 @@ def test_make_tx_transformer_payne_mup_scales_parameter_groups():
             b1=0.0,
             lr_scaling="mup",
             scale_embedding_lr=0.5,
+            schedule="constant",
         ),
     )
 
@@ -203,8 +247,61 @@ def test_make_tx_transformer_payne_mup_scales_parameter_groups():
     assert float(updates["head"]["proj0"]["b"][0]) == pytest.approx(-1.0)
 
 
+def test_make_tx_transformer_payne_si_scales_only_embedding_groups():
+    # Legacy standard parameterization: embeddings at lr * scale_embedding_lr
+    # (emb_out is NOT width-divided, unlike mup); everything else at base lr.
+    # No reference_width is required.
+    params = {
+        "param_embedding": {
+            "w0": jnp.ones((2, 8), dtype=jnp.float32),
+            "w1": jnp.ones((8, 16), dtype=jnp.float32),
+            "b0": jnp.ones((8,), dtype=jnp.float32),
+        },
+        "attn_layers": {0: {"wq": jnp.ones((8, 8), dtype=jnp.float32)}},
+        "ff_layers": {0: {"in_proj": {"w": jnp.ones((8, 32), dtype=jnp.float32)}}},
+        "head": {"proj0": {"w": jnp.ones((8, 8), dtype=jnp.float32)}},
+    }
+    grads = jax.tree_util.tree_map(jnp.ones_like, params)
+    cfg = RootConfig(
+        model=ModelSpec(name="transformer_payne", params={"dim": 8, "no_layers": 2}),
+        optim=OptimConfig(
+            name="sgd",
+            lr=1.0,
+            b1=0.0,
+            lr_scaling="si",
+            scale_embedding_lr=0.25,
+            schedule="constant",
+        ),
+    )
+
+    tx = make_tx(cfg, params=params)
+    updates, _ = tx.update(grads, tx.init(params), params)
+
+    assert float(updates["param_embedding"]["w0"][0, 0]) == pytest.approx(-0.25)
+    assert float(updates["param_embedding"]["w1"][0, 0]) == pytest.approx(-0.25)
+    assert float(updates["param_embedding"]["b0"][0]) == pytest.approx(-1.0)
+    assert float(updates["attn_layers"][0]["wq"][0, 0]) == pytest.approx(-1.0)
+    assert float(updates["ff_layers"][0]["in_proj"]["w"][0, 0]) == pytest.approx(-1.0)
+    assert float(updates["head"]["proj0"]["w"][0, 0]) == pytest.approx(-1.0)
+
+
+def test_make_tx_mlp_rejects_si():
+    params = {"layers": {0: {"kernel": jnp.ones((3, 2), dtype=jnp.float32)}}}
+    cfg = RootConfig(
+        model=ModelSpec(name="mlp", params={"hidden_sizes": (8,)}),
+        optim=OptimConfig(lr_scaling="si", scale_embedding_lr=0.5),
+    )
+
+    with pytest.raises(ValueError, match="only supported for"):
+        make_tx(cfg, params=params)
+
+
 def test_make_tx_transformer_payne_mup_depth_scales_attention_and_ff_by_depth():
     params = {
+        "param_embedding": {
+            "w0": jnp.ones((2, 8), dtype=jnp.float32),
+            "w1": jnp.ones((8, 16), dtype=jnp.float32),
+        },
         "attn_layers": {0: {"wq": jnp.ones((8, 8), dtype=jnp.float32)}},
         "ff_layers": {0: {"out_proj": {"w": jnp.ones((32, 8), dtype=jnp.float32)}}},
         "head": {"proj1": {"w": jnp.ones((8, 1), dtype=jnp.float32)}},
@@ -220,7 +317,9 @@ def test_make_tx_transformer_payne_mup_depth_scales_attention_and_ff_by_depth():
                 "reference_depth": 2,
             },
         ),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup_depth"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup_depth", schedule="constant"
+        ),
     )
 
     tx = make_tx(cfg, params=params)
@@ -232,11 +331,21 @@ def test_make_tx_transformer_payne_mup_depth_scales_attention_and_ff_by_depth():
 
 
 def test_make_tx_transformer_payne_mup_uses_model_config_defaults():
-    params = {"head": {"proj1": {"w": jnp.ones((8, 1), dtype=jnp.float32)}}}
+    params = {
+        "param_embedding": {
+            "w0": jnp.ones((2, 8), dtype=jnp.float32),
+            "w1": jnp.ones((8, 16), dtype=jnp.float32),
+        },
+        "attn_layers": {0: {"wq": jnp.ones((8, 8), dtype=jnp.float32)}},
+        "ff_layers": {0: {"in_proj": {"w": jnp.ones((8, 32), dtype=jnp.float32)}}},
+        "head": {"proj1": {"w": jnp.ones((8, 1), dtype=jnp.float32)}},
+    }
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
     cfg = RootConfig(
         model=ModelSpec(name="transformer_payne", params={"reference_width": 64}),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"
+        ),
     )
 
     tx = make_tx(cfg, params=params)
@@ -292,7 +401,9 @@ def test_make_tx_mlp_mup_scales_kernels_and_leaves_biases_at_base_lr():
             name="mlp",
             params={"hidden_sizes": (8, 8), "reference_width": 4},
         ),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"
+        ),
     )
 
     tx = make_tx(cfg, params=params)
@@ -310,7 +421,9 @@ def test_make_tx_mlp_mup_uses_default_hidden_width():
     grads = jax.tree_util.tree_map(jnp.ones_like, params)
     cfg = RootConfig(
         model=ModelSpec(name="mlp", params={"reference_width": 128}),
-        optim=OptimConfig(name="sgd", lr=1.0, b1=0.0, lr_scaling="mup"),
+        optim=OptimConfig(
+            name="sgd", lr=1.0, b1=0.0, lr_scaling="mup", schedule="constant"
+        ),
     )
 
     tx = make_tx(cfg, params=params)
@@ -356,6 +469,7 @@ def test_make_tx_builds_soap_with_config(monkeypatch):
         optim=OptimConfig(
             name="soap",
             lr=3e-3,
+            schedule="constant",
             b1=0.95,
             b2=0.95,
             eps=1e-8,

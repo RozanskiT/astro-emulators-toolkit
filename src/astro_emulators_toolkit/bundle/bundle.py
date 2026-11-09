@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ..config.io import load_config, save_config
+from ..config.io import load_config_with_migration_notes, save_config
 from ..config.schema import (
     CONFIG_SCHEMA_VERSION,
     RootConfig,
@@ -32,12 +32,24 @@ def make_portable_bundle_config(cfg: RootConfig) -> RootConfig:
     )
 
 
+def bundle_toolkit_version(metadata: dict[str, Any]) -> str | None:
+    """The toolkit version a bundle records in its provenance, if any."""
+    provenance = metadata.get("provenance")
+    version = (
+        provenance.get("toolkit_version") if isinstance(provenance, dict) else None
+    )
+    return version if isinstance(version, str) else None
+
+
 @dataclass
 class Bundle:
     cfg: RootConfig
     params_pure: dict[str, Any]
     metadata: dict[str, Any]
     readme_text: str | None = None
+    # Set by load(): what the config.json migration changed (see
+    # config/migrations.py).
+    config_migration_notes: list[str] = field(default_factory=list)
 
     def save(self, dirpath: str | Path) -> None:
         d = Path(dirpath)
@@ -72,12 +84,15 @@ class Bundle:
         if not readme_path.exists():
             raise FileNotFoundError(f"Bundle is missing required file: {readme_path}")
 
-        cfg = load_config(d / CONFIG_FILENAME)
-        params_pure = load_weights(weights_path)
         metadata = json.loads((d / METADATA_FILENAME).read_text())
+        cfg, notes, _ = load_config_with_migration_notes(
+            d / CONFIG_FILENAME, toolkit_version=bundle_toolkit_version(metadata)
+        )
+        params_pure = load_weights(weights_path)
         return cls(
             cfg=cfg,
             params_pure=params_pure,
             metadata=metadata,
             readme_text=readme_path.read_text(),
+            config_migration_notes=notes,
         )

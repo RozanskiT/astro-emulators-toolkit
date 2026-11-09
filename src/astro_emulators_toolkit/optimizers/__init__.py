@@ -9,12 +9,9 @@ import optax
 def make_learning_rate(cfg):
     lr = float(cfg.optim.lr)
     schedule_name = str(cfg.optim.schedule).lower()
-    warmup_steps = int(cfg.optim.warmup_steps)
     decay_steps = int(cfg.optim.decay_steps)
     total_steps = int(cfg.training.num_steps)
 
-    if warmup_steps < 0:
-        raise ValueError("optim.warmup_steps must be >= 0.")
     if decay_steps < 0:
         raise ValueError("optim.decay_steps must be >= 0.")
 
@@ -24,13 +21,35 @@ def make_learning_rate(cfg):
     if total_steps <= 0:
         raise ValueError("training.num_steps must be > 0.")
 
-    def _zero_ending_linear(init_value: float, end_value: float, num_updates: int):
+    if cfg.optim.warmup_steps is None:
+        # Automatic linear warmup over the first 10% of training.
+        warmup_steps = int(round(0.1 * total_steps))
+    else:
+        warmup_steps = int(cfg.optim.warmup_steps)
+    if warmup_steps < 0:
+        raise ValueError("optim.warmup_steps must be >= 0.")
+
+    # Endpoint convention: optax evaluates schedule(count) with count starting
+    # at 0 for the first applied update, so trainer step k uses schedule(k-1).
+    # Every applied step (counts 0 .. num_steps-1) gets a strictly positive LR;
+    # decay reaches zero only at count == num_steps, which is never applied.
+    # Warmup ramps lr/warmup, 2*lr/warmup, ..., lr over the first warmup steps.
+
+    def _warmup_schedule(num_updates: int):
         if num_updates <= 1:
-            return optax.constant_schedule(end_value)
+            return optax.constant_schedule(lr)
         return optax.linear_schedule(
-            init_value=init_value,
-            end_value=end_value,
+            init_value=lr / num_updates,
+            end_value=lr,
             transition_steps=num_updates - 1,
+        )
+
+    def _decay_to_zero_linear(num_updates: int):
+        # Reaches 0 one count past the last applied update.
+        return optax.linear_schedule(
+            init_value=lr,
+            end_value=0.0,
+            transition_steps=max(1, num_updates),
         )
 
     effective_warmup_steps = min(warmup_steps, max(0, total_steps - 1))
@@ -39,16 +58,12 @@ def make_learning_rate(cfg):
         cosine_updates = max(1, total_steps - effective_warmup_steps)
         cosine = optax.cosine_decay_schedule(
             init_value=lr,
-            decay_steps=max(1, cosine_updates - 1),
+            decay_steps=cosine_updates,
         )
         if effective_warmup_steps > 0:
-            warmup = optax.linear_schedule(
-                init_value=0.0,
-                end_value=lr,
-                transition_steps=effective_warmup_steps,
-            )
             return optax.join_schedules(
-                [warmup, cosine], boundaries=[effective_warmup_steps]
+                [_warmup_schedule(effective_warmup_steps), cosine],
+                boundaries=[effective_warmup_steps],
             )
         return cosine
 
@@ -58,13 +73,7 @@ def make_learning_rate(cfg):
         elapsed = 0
 
         if effective_warmup_steps > 0:
-            schedules.append(
-                optax.linear_schedule(
-                    init_value=0.0,
-                    end_value=lr,
-                    transition_steps=effective_warmup_steps,
-                )
-            )
+            schedules.append(_warmup_schedule(effective_warmup_steps))
             elapsed += effective_warmup_steps
 
         updates_after_warmup = total_steps - effective_warmup_steps
@@ -80,9 +89,7 @@ def make_learning_rate(cfg):
 
         if schedules:
             boundaries.append(elapsed)
-        schedules.append(
-            _zero_ending_linear(init_value=lr, end_value=0.0, num_updates=decay_updates)
-        )
+        schedules.append(_decay_to_zero_linear(decay_updates))
 
         if len(schedules) == 1:
             return schedules[0]
@@ -149,8 +156,23 @@ def _with_grad_clip(
 
 def _transformer_payne_lr_factors(cfg) -> dict[str, float]:
     lr_scaling = cfg.optim.lr_scaling
-    if lr_scaling not in {"mup", "mup_depth"}:
-        raise ValueError("Only 'mup' and 'mup_depth' LR scaling are supported.")
+    if lr_scaling not in {"si", "mup", "mup_depth"}:
+        raise ValueError("Only 'si', 'mup', and 'mup_depth' LR scaling are supported.")
+
+    if lr_scaling == "si":
+        # Legacy standard parameterization: embedding groups train at
+        # lr * scale_embedding_lr (the output embedding is NOT width-divided,
+        # unlike mup); all other groups keep the base learning rate.
+        scale_embedding_lr = float(cfg.optim.scale_embedding_lr)
+        return {
+            "emb_in": scale_embedding_lr,
+            "emb_out": scale_embedding_lr,
+            "attn": 1.0,
+            "ff": 1.0,
+            "head": 1.0,
+            "bias": 1.0,
+            "default": 1.0,
+        }
 
     from ..models.transformer_payne import TransformerPayneConfig
 
@@ -184,9 +206,10 @@ def _transformer_payne_lr_factors(cfg) -> dict[str, float]:
 
 
 def _mlp_lr_factors(cfg) -> dict[str, float]:
-    if cfg.optim.lr_scaling == "mup_depth":
+    if cfg.optim.lr_scaling in {"si", "mup_depth"}:
         raise ValueError(
-            "optim.lr_scaling='mup_depth' is only supported for transformer_payne."
+            f"optim.lr_scaling={cfg.optim.lr_scaling!r} is only supported for "
+            "transformer_payne."
         )
     if cfg.optim.lr_scaling != "mup":
         raise ValueError("Only 'mup' LR scaling is supported for mlp.")
@@ -203,7 +226,16 @@ def _mlp_lr_factors(cfg) -> dict[str, float]:
             "optim.lr_scaling='mup' requires non-empty model.params.hidden_sizes."
         )
 
-    width_scaling = float(model_cfg.hidden_sizes[0]) / float(model_cfg.reference_width)
+    hidden_sizes = tuple(int(size) for size in model_cfg.hidden_sizes)
+    if len(set(hidden_sizes)) != 1:
+        raise ValueError(
+            "optim.lr_scaling='mup' for mlp requires uniform hidden_sizes "
+            f"(got {hidden_sizes}); the width factor is derived from a single "
+            "hidden width."
+        )
+    # Faithful to the original recipe: ALL dense kernels are width-divided,
+    # including the input and output layers (nonstandard MuP, deliberate).
+    width_scaling = float(hidden_sizes[0]) / float(model_cfg.reference_width)
     return {
         "mlp_kernel": 1.0 / width_scaling,
         "bias": 1.0,
@@ -221,6 +253,7 @@ def _lr_scaling_factors(cfg) -> dict[str, float]:
     )
 
 
+# Bias/vector leaf names used by aemu model families (kept at base LR).
 _BIAS_PARAM_NAMES = {
     "b",
     "b0",
@@ -229,21 +262,24 @@ _BIAS_PARAM_NAMES = {
     "bk",
     "bv",
     "bo",
-    "be0",
-    "be1",
-    "b_q",
-    "b_k",
-    "b_v",
-    "b_o",
-    "bfi",
-    "bfo",
-    "bp0",
-    "bp1",
     "bias",
 }
 
+# Canonical wrappers (models/canonical_wrappers.py) store the trainable model
+# under this attribute, so param trees built through Emulator.from_config are
+# rooted at "core_model" rather than at the raw model's own modules.
+_WRAPPER_ROOT_KEYS = frozenset({"core_model"})
+
+
+def _strip_wrapper_prefix(path: tuple[Any, ...]) -> tuple[Any, ...]:
+    idx = 0
+    while idx < len(path) - 1 and str(path[idx]) in _WRAPPER_ROOT_KEYS:
+        idx += 1
+    return path[idx:]
+
 
 def _label_transformer_payne_param_path(path: tuple[Any, ...]) -> str:
+    path = _strip_wrapper_prefix(path)
     if not path:
         return "default"
     root = path[0]
@@ -285,6 +321,7 @@ def _label_transformer_payne_params(params: Any, path: tuple[Any, ...] = ()) -> 
 
 
 def _label_mlp_param_path(path: tuple[Any, ...]) -> str:
+    path = _strip_wrapper_prefix(path)
     if not path:
         return "default"
     leaf = str(path[-1])
@@ -321,6 +358,37 @@ def _label_scaled_params(cfg, params: Any) -> Any:
     )
 
 
+def _collect_label_counts(labels: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                _walk(value)
+        else:
+            counts[str(node)] = counts.get(str(node), 0) + 1
+
+    _walk(labels)
+    return counts
+
+
+def _validate_scaled_labels(cfg, factors: Mapping[str, float], labels: Any) -> None:
+    counts = _collect_label_counts(labels)
+    required = set(factors) - {"bias", "default"}
+    missing = sorted(name for name in required if counts.get(name, 0) == 0)
+    if missing:
+        raise ValueError(
+            f"optim.lr_scaling={cfg.optim.lr_scaling!r} for model "
+            f"'{cfg.model.name}' matched no parameters for LR groups {missing} "
+            f"(observed label counts: {counts}). The parameter tree layout is "
+            "not recognized by the LR-group labeler, so scaled learning rates "
+            "would silently not be applied."
+        )
+
+
 def make_tx(cfg, params: Any | None = None) -> optax.GradientTransformation:
     lr = make_learning_rate(cfg)
 
@@ -338,6 +406,7 @@ def make_tx(cfg, params: Any | None = None) -> optax.GradientTransformation:
         for label, factor in factors.items()
     }
     labels = _label_scaled_params(cfg, params)
+    _validate_scaled_labels(cfg, factors, labels)
     return _with_grad_clip(cfg, optax.multi_transform(transforms, labels))
 
 

@@ -193,3 +193,26 @@ def test_siren_config_from_dict_rejects_invalid_values(payload, match):
 def test_transformer_payne_config_from_dict_rejects_invalid_values(payload, match):
     with pytest.raises(ValueError, match=match):
         TransformerPayneConfig.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "config_cls",
+    [MLPConfig, SirenConfig, ExplicitWavelengthMLPConfig, MLP2DRegressionConfig],
+)
+def test_param_dtype_defaults_to_dtype_and_can_be_set_separately(config_cls):
+    assert config_cls.from_dict({"dtype": "bfloat16"}).param_dtype == "bfloat16"
+    mixed = config_cls.from_dict({"dtype": "bfloat16", "param_dtype": "float32"})
+    assert (mixed.dtype, mixed.param_dtype) == ("bfloat16", "float32")
+    with pytest.raises(ValueError, match="param_dtype must be a valid JAX dtype"):
+        config_cls.from_dict({"param_dtype": "not-a-dtype"})
+
+
+def test_mlp_param_dtype_sets_parameter_storage_not_compute_dtype():
+    cfg = MLPConfig.from_dict(
+        {"hidden_sizes": [4], "dtype": "bfloat16", "param_dtype": "float32"}
+    )
+    model = MLP(in_dim=3, out_dim=2, cfg=cfg, rngs=nnx.Rngs(0))
+
+    kernel_dtypes = {jnp.dtype(layer.kernel[...].dtype) for layer in model.layers}
+    assert kernel_dtypes == {jnp.dtype(jnp.float32)}
+    assert model(jnp.ones((5, 3), dtype=jnp.float32)).dtype == jnp.bfloat16

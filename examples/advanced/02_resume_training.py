@@ -53,6 +53,8 @@ def main() -> None:
     x_train, y_train, x_val, y_val, _ = split_randomized_flux(val_fraction=0.1, seed=0)
 
     emu = Emulator.from_config(cfg)
+    # fit(callbacks=None) would build these automatically; build them
+    # explicitly here because we append a custom callback below.
     callbacks = build_callbacks_from_config(cfg)
     final_step = FinalStepRecorder()
     callbacks.append(final_step)

@@ -10,6 +10,13 @@ from astro_emulators_toolkit.inference.compose import (
 )
 from astro_emulators_toolkit.inference import compose
 
+# The toy grids here are deliberately short (128 px), which correctly trips
+# the kernel-vs-spectrum-length edge-bias warning; it is tested explicitly in
+# test_downgrade_resolution_warns_when_kernel_dominates_short_spectrum.
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:Spectral-resolution kernel half-width:UserWarning"
+)
+
 
 def _log_wavelength_grid(n: int = 128) -> jax.Array:
     return jnp.linspace(jnp.log10(5000.0), jnp.log10(5010.0), n)
@@ -280,3 +287,25 @@ def test_downgrade_spectral_resolution_kernel_does_not_keep_wavelength_vector() 
 def test_only_downgrade_resolution_helper_is_public() -> None:
     assert "downgrade_spectral_resolution" in compose.__all__
     assert "apply_spectral_resolution" not in compose.__all__
+
+
+def test_downgrade_resolution_warns_when_kernel_dominates_short_spectrum():
+    import warnings as _warnings
+
+    import pytest as _pytest
+
+    from astro_emulators_toolkit.inference.compose import (
+        _spectral_resolution_kernel,
+    )
+
+    # 60 pixels over a wide log range at low resolution: kernel half-width is
+    # a large fraction of the spectrum.
+    short_grid = np.linspace(3.0, 3.01, 60)
+    with _pytest.warns(UserWarning, match="edge-biased"):
+        _spectral_resolution_kernel(short_grid, resolution=300.0, window_size=4.0)
+
+    # A long spectrum at high resolution does not warn.
+    long_grid = np.linspace(3.0, 3.5, 20_000)
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error")
+        _spectral_resolution_kernel(long_grid, resolution=30_000.0, window_size=4.0)

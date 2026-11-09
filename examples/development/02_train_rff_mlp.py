@@ -38,7 +38,6 @@ cfg = RootConfig(
         workdir=str(script_dir / "runs/rff_mlp"),
         batch_size=256,
         num_steps=2000,
-        val_fraction=0.1,
         logging_interval_steps=25,
         evaluation_interval_steps=200,
         checkpoint_interval_steps=200,
@@ -47,7 +46,7 @@ cfg = RootConfig(
 )
 
 ds = NpyTableDataset.from_config(data_cfg)
-train_ds, val_ds = ds.train_val_split(cfg.training.val_fraction, seed=cfg.seed)
+train_ds, val_ds = ds.train_val_split(val_fraction=0.1, seed=cfg.seed)
 
 emu = Emulator.from_config(cfg).configure_training()
 

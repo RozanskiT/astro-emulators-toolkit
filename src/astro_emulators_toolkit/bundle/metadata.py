@@ -8,10 +8,10 @@ from .release import (
     validate_fingerprint_evaluation_metadata,
 )
 from .versions import (
-    BUNDLE_FORMAT_VERSION,
-    CONFIG_SCHEMA_VERSION,
-    SPEC_VERSION,
-    WEIGHTS_LAYOUT,
+    SUPPORTED_BUNDLE_FORMAT_VERSIONS,
+    SUPPORTED_CONFIG_SCHEMA_VERSIONS,
+    SUPPORTED_SPEC_VERSIONS,
+    SUPPORTED_WEIGHTS_LAYOUTS,
 )
 from ..io_trees import validate_same_structure
 from ..models import get_stable_model_entry
@@ -116,10 +116,13 @@ def _resolve_solver_config(cfg) -> dict[str, Any]:
 
 
 def build_resolved_bundle_config(cfg) -> dict[str, Any]:
+    import dataclasses
+
     return {
         "model": _resolve_model_config(cfg),
         "task": _resolve_task_config(cfg),
         "solver": _resolve_solver_config(cfg),
+        "optim": to_json_compatible(dataclasses.asdict(cfg.optim)),
     }
 
 
@@ -240,9 +243,12 @@ def validate_bundle_header(metadata: Any) -> None:
         raise ValueError(
             "Bundle metadata field 'bundle_format_version' must be present and be an int."
         )
-    if bundle_format_version != BUNDLE_FORMAT_VERSION:
+    if bundle_format_version not in SUPPORTED_BUNDLE_FORMAT_VERSIONS:
         raise ValueError(
-            f"Unsupported bundle_format_version={bundle_format_version} (expected {BUNDLE_FORMAT_VERSION})."
+            f"Unsupported bundle_format_version={bundle_format_version} "
+            f"(supported: {sorted(SUPPORTED_BUNDLE_FORMAT_VERSIONS)}). "
+            "Newer bundles need a newer toolkit; older bundles need a "
+            "registered migration (see bundle/versions.py)."
         )
 
     _validate_release_metadata(metadata.get("release"))
@@ -252,9 +258,10 @@ def validate_bundle_header(metadata: Any) -> None:
         raise ValueError(
             "Bundle metadata field 'config_schema_version' must be present and be an int."
         )
-    if config_schema_version != CONFIG_SCHEMA_VERSION:
+    if config_schema_version not in SUPPORTED_CONFIG_SCHEMA_VERSIONS:
         raise ValueError(
-            f"Unsupported config_schema_version={config_schema_version} (expected {CONFIG_SCHEMA_VERSION})."
+            f"Unsupported config_schema_version={config_schema_version} "
+            f"(supported: {sorted(SUPPORTED_CONFIG_SCHEMA_VERSIONS)})."
         )
 
     spec = metadata.get("spec")
@@ -269,9 +276,10 @@ def validate_bundle_header(metadata: Any) -> None:
         raise ValueError(
             "Bundle metadata field 'spec.spec_version' must be present and be an int."
         )
-    if spec_version != SPEC_VERSION:
+    if spec_version not in SUPPORTED_SPEC_VERSIONS:
         raise ValueError(
-            f"Unsupported spec_version={spec_version} (expected {SPEC_VERSION})."
+            f"Unsupported spec_version={spec_version} "
+            f"(supported: {sorted(SUPPORTED_SPEC_VERSIONS)})."
         )
 
     weights_layout = metadata.get("weights_layout")
@@ -279,8 +287,11 @@ def validate_bundle_header(metadata: Any) -> None:
         raise ValueError(
             "Bundle metadata field 'weights_layout' must be present and be a string."
         )
-    if weights_layout != WEIGHTS_LAYOUT:
-        raise ValueError(f"Unsupported bundle weights_layout '{weights_layout}'.")
+    if weights_layout not in SUPPORTED_WEIGHTS_LAYOUTS:
+        raise ValueError(
+            f"Unsupported bundle weights_layout '{weights_layout}' "
+            f"(supported: {sorted(SUPPORTED_WEIGHTS_LAYOUTS)})."
+        )
 
     model_family_id = metadata.get("model_family_id")
     if not isinstance(model_family_id, str) or not model_family_id:

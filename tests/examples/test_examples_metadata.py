@@ -240,11 +240,8 @@ def test_advanced_transformer_payne_intensity_example_writes_bundle_dir() -> Non
     completed = _run_example(
         "examples/advanced/03_train_transformer_payne_intensity.py", smoke=True
     )
-    assert "Periodic training log interval:" in completed.stdout
-    assert "Explicit training log steps:" in completed.stdout
-    assert "Recorded validation steps:" in completed.stdout
-    assert "Explicit checkpoint steps:" in completed.stdout
-    assert "Recorded checkpoint steps:" in completed.stdout
+    assert "Output channels:" in completed.stdout
+    assert "Pred shape:" in completed.stdout
     bundle_path = _extract_saved_bundle_path(completed.stdout)
     assert bundle_path.exists()
     assert bundle_path.is_dir()
@@ -262,6 +259,9 @@ def test_advanced_resume_training_example_runs() -> None:
 def test_advanced_training_internals_example_runs() -> None:
     completed = _run_example("examples/advanced/05_training_internals.py")
     assert "History keys:" in completed.stdout
+    # Explicit steps (1, 2) union with the periodic interval of 3.
+    assert "Recorded training steps: (1, 2, 3, 6)" in completed.stdout
+    assert "Recorded validation steps: (1, 2, 3, 6)" in completed.stdout
     assert "Last fit method:" in completed.stdout
 
 

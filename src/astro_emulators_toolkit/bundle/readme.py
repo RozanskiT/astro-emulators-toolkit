@@ -55,7 +55,8 @@ def render_bundle_readme(cfg, metadata: dict[str, Any], fit_method: str | None) 
         f"  toolkit_version: {provenance.get('toolkit_version', 'unknown')}",
         f"  created_at: {provenance.get('created_at', 'unknown')}",
         f"  python_version: {provenance.get('python_version', 'unknown')}",
-        f"  git_commit: {provenance.get('git_commit', 'unknown')}",
+        "  working_tree_git_commit: "
+        f"{provenance.get('working_tree_git_commit', 'unknown')}",
         "",
         "spec:",
         format_spec_for_display(metadata["spec"]),

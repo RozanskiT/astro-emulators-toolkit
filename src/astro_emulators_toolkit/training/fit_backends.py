@@ -40,6 +40,7 @@ def fit_with_gradient_backend(
     resume: bool,
     max_steps: int | None,
     device_batch_transform: DeviceBatchTransformLike | None,
+    external_optimizer: bool = False,
 ) -> BackendFitResult:
     from .trainer import fit as gradient_fit
 
@@ -55,6 +56,7 @@ def fit_with_gradient_backend(
         resume=resume,
         max_steps=max_steps,
         device_batch_transform=device_batch_transform,
+        external_optimizer=external_optimizer,
     )
     return BackendFitResult(
         params=result.state.params,

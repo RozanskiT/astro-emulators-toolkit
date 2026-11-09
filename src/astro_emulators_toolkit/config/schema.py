@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+import warnings
+from dataclasses import dataclass, field, is_dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -15,7 +16,9 @@ from ..io_trees import (
 
 
 SchemaDict = dict[str, Any]
-CONFIG_SCHEMA_VERSION = 1
+# Version history and the in-memory upgrade of older documents live in
+# config/migrations.py.
+CONFIG_SCHEMA_VERSION = 2
 
 
 def _normalize_registry_name(name: str) -> str:
@@ -281,6 +284,15 @@ class SolverConfig:
             if ridge < 0.0:
                 raise ValueError("solver.params.ridge must be >= 0.")
             params["ridge"] = ridge
+        if name == "gradient" and params:
+            # The gradient solver reads its settings from optim/training, not
+            # solver.params; silently accepting keys here hid typos and
+            # misplaced settings.
+            raise ValueError(
+                "solver.params is not used by the 'gradient' solver "
+                f"(got keys: {sorted(params)}). Gradient training is "
+                "configured through the 'optim' and 'training' sections."
+            )
         object.__setattr__(self, "params", params)
 
 
@@ -290,14 +302,16 @@ class OptimConfig:
 
     name: str = "adamw"  # "adam" | "adamw" | "sgd" | "soap"
     lr: float = 1e-3
-    lr_scaling: str | None = None  # None | "mup" | "mup_depth"
+    lr_scaling: str | None = None  # None | "si" | "mup" | "mup_depth"
     scale_embedding_lr: float = 1.0
-    schedule: str = "constant"  # "constant" | "cosine" | "wsd"
-    warmup_steps: int = 0
+    schedule: str = "cosine"  # "constant" | "cosine" | "wsd"
+    # None means automatic warmup: round(0.1 * training.num_steps) for the
+    # "cosine" and "wsd" schedules. Set 0 to disable warmup explicitly.
+    warmup_steps: int | None = None
     decay_steps: int = 0  # used by "wsd" (warmup-stable-decay)
     weight_decay: float = 0.0
     grad_clip: float = 0.0
-    b1: float = 0.9
+    b1: float = 0.9  # Adam beta1; also reused as SGD momentum
     b2: float = 0.999
     eps: float = 1e-8
     precondition_frequency: int = 10
@@ -319,11 +333,18 @@ class OptimConfig:
         lr_scaling = self.lr_scaling
         if lr_scaling is not None:
             lr_scaling = _normalize_registry_name(str(lr_scaling))
-            if lr_scaling in {"", "none", "standard", "si"}:
+            if lr_scaling in {"", "none"}:
                 lr_scaling = None
-            elif lr_scaling not in {"mup", "mup_depth"}:
+            elif lr_scaling == "standard":
                 raise ValueError(
-                    "optim.lr_scaling must be None, 'mup', or 'mup_depth'."
+                    "optim.lr_scaling='standard' is ambiguous. Use None for one "
+                    "shared learning rate, or 'si' for the legacy standard "
+                    "parameterization where embedding groups are scaled by "
+                    "optim.scale_embedding_lr."
+                )
+            elif lr_scaling not in {"si", "mup", "mup_depth"}:
+                raise ValueError(
+                    "optim.lr_scaling must be None, 'si', 'mup', or 'mup_depth'."
                 )
         object.__setattr__(self, "lr_scaling", lr_scaling)
 
@@ -332,6 +353,19 @@ class OptimConfig:
         )
         if scale_embedding_lr < 0.0:
             raise ValueError("optim.scale_embedding_lr must be >= 0.")
+        if lr_scaling == "si" and scale_embedding_lr == 1.0:
+            warnings.warn(
+                "optim.lr_scaling='si' with scale_embedding_lr=1.0 is "
+                "equivalent to lr_scaling=None (one shared learning rate); "
+                "set scale_embedding_lr to the intended embedding factor.",
+                stacklevel=2,
+            )
+        if scale_embedding_lr != 1.0 and lr_scaling is None:
+            raise ValueError(
+                "optim.scale_embedding_lr has no effect when optim.lr_scaling is "
+                "None; set lr_scaling='si' (or 'mup'/'mup_depth') to scale "
+                "embedding learning rates, or leave scale_embedding_lr at 1.0."
+            )
         object.__setattr__(self, "scale_embedding_lr", scale_embedding_lr)
 
         weight_decay = _normalize_finite_float(
@@ -382,6 +416,25 @@ class OptimConfig:
             ),
         )
 
+        if self.warmup_steps is not None:
+            warmup_steps = _normalize_int(
+                self.warmup_steps, field_name="optim.warmup_steps"
+            )
+            if warmup_steps < 0:
+                raise ValueError("optim.warmup_steps must be >= 0.")
+            object.__setattr__(self, "warmup_steps", warmup_steps)
+
+        decay_steps = _normalize_int(self.decay_steps, field_name="optim.decay_steps")
+        if decay_steps < 0:
+            raise ValueError("optim.decay_steps must be >= 0.")
+        if decay_steps > 0 and self.schedule == "cosine":
+            raise ValueError(
+                "optim.decay_steps is only used by the 'wsd' schedule; the "
+                "'cosine' schedule always decays over "
+                "training.num_steps - warmup_steps."
+            )
+        object.__setattr__(self, "decay_steps", decay_steps)
+
 
 @dataclass(frozen=True)
 class TrainConfig:
@@ -391,7 +444,9 @@ class TrainConfig:
     batch_size: int = 1024
     # total target optimization steps; resume=True trains until state.step reaches num_steps
     num_steps: int = 1000
-    val_fraction: float = 0.1
+    # There is no validation-split setting: fit() never splits. Build the
+    # validation set yourself (e.g. data.train_val_split) and pass it as
+    # validation_dataset.
 
     shuffle: bool = True
     shuffle_seed: int = 0
@@ -403,11 +458,25 @@ class TrainConfig:
     evaluation_interval_steps: int | None = 500
     # optional absolute optimization steps to run validation on; unioned with evaluation_interval_steps
     evaluation_steps: tuple[int, ...] | None = None
+    # 0 or None disables periodic checkpointing (as for the logging and
+    # evaluation intervals above)
     checkpoint_interval_steps: int | None = 500
     # optional absolute optimization steps to checkpoint on; unioned with checkpoint_interval_steps
     checkpoint_steps: tuple[int, ...] | None = None
-    # None means preserve all saved checkpoints
+    # Retention only — does NOT enable/disable checkpointing (that is
+    # checkpoint_interval_steps/checkpoint_steps). None preserves all
+    # saved checkpoints.
     max_saved_checkpoints: int | None = 5
+    # Validation metric name to track for best-model checkpointing — the
+    # bare eval-metric name (e.g. "loss", "mae"), not the "validation_"-
+    # prefixed history key (a "validation_" prefix is stripped if given). When set, the single best TrainState is kept under
+    # checkpoints_best/ in the workdir, separate from the resume checkpoints;
+    # restore it with Emulator.load_best_checkpoint(). None disables tracking.
+    checkpoint_best_metric: str | None = None
+    checkpoint_best_mode: str = "min"  # "min" | "max"
+    # set False to force synchronous checkpoint writes (useful when bisecting
+    # GPU instability, at the cost of blocking the training loop per save)
+    async_checkpointing: bool = True
 
     # if None: inferred from dataset length (ceil(len / batch_size))
     # used to infer epoch boundaries/metrics while training is step-based
@@ -424,15 +493,18 @@ class TrainConfig:
             raise ValueError("training.num_steps must be >= 0.")
         object.__setattr__(self, "num_steps", num_steps)
 
-        val_fraction = _normalize_finite_float(
-            self.val_fraction,
-            field_name="training.val_fraction",
-        )
-        if val_fraction < 0.0 or val_fraction > 1.0:
-            raise ValueError(
-                "training.val_fraction must satisfy 0 <= val_fraction <= 1."
-            )
-        object.__setattr__(self, "val_fraction", val_fraction)
+        if self.checkpoint_best_metric is not None:
+            metric = str(self.checkpoint_best_metric).strip()
+            if not metric:
+                raise ValueError(
+                    "training.checkpoint_best_metric must be a non-empty "
+                    "string or None."
+                )
+            object.__setattr__(self, "checkpoint_best_metric", metric)
+        mode = str(self.checkpoint_best_mode).strip().lower()
+        if mode not in {"min", "max"}:
+            raise ValueError("training.checkpoint_best_mode must be 'min' or 'max'.")
+        object.__setattr__(self, "checkpoint_best_mode", mode)
 
         shuffle_seed = _normalize_int(
             self.shuffle_seed,
@@ -644,8 +716,25 @@ class RootConfig:
     io: IOSpec = field(default_factory=IOSpec)
 
     def with_updates(self, **kwargs) -> "RootConfig":
-        """Return a copy with selected top-level fields replaced."""
-        return canonicalize_config_names(replace(self, **kwargs))
+        """Return a copy with selected top-level fields replaced.
+
+        A config section may be given either as a full section object or as a
+        dict of field updates merged into the existing section::
+
+            cfg.with_updates(training={"num_steps": 500, "batch_size": 64})
+        """
+        resolved: dict[str, Any] = {}
+        for name, value in kwargs.items():
+            current = getattr(self, name, None)
+            if (
+                isinstance(value, dict)
+                and is_dataclass(current)
+                and not isinstance(current, type)
+            ):
+                resolved[name] = replace(current, **value)
+            else:
+                resolved[name] = value
+        return canonicalize_config_names(replace(self, **resolved))
 
 
 def canonicalize_config_names(cfg: RootConfig) -> RootConfig:

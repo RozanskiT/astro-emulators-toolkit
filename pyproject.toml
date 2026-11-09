@@ -26,8 +26,10 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=2.1",
+    # jax pins its own compatible jaxlib; declaring jaxlib directly here can
+    # resolve a jaxlib/CUDA-plugin combination that jax was not built against,
+    # which manifests as hard segfaults on GPU clusters.
     "jax>=0.6.0",
-    "jaxlib>=0.6.0",
     "flax>=0.10.4",
     "optax>=0.2.5",
     "orbax-checkpoint>=0.11.5",
@@ -43,6 +45,9 @@ blackjax = [
 ]
 viz = [
     "matplotlib>=3.9",
+]
+cuda12 = [
+    "jax[cuda12]>=0.6.0",
 ]
 
 [dependency-groups]

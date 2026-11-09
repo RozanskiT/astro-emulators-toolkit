@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from ..data.protocols import DeviceBatchTransform
 from .._typing import AffineLeafSpecs
@@ -19,6 +19,61 @@ from .canonical_wrappers import (
     CanonicalTransformerModelWrapper,
 )
 from .transformer_payne import derive_transformer_payne_channel_semantics
+
+
+def _warn_on_frequency_encoding_span_mismatch(cfg, *, wavelength_arrays) -> None:
+    """Coordinate-agnostic sanity check for the wavelength frequency encoding.
+
+    The transformer is unit-agnostic, but its frequency encoding only covers
+    structure at scales between ``min_period`` and ``max_period`` in whatever
+    coordinate the wavelengths are expressed in. The recommended convention is
+    an affine-scaled coordinate whose span is of order 1.0, with
+    ``max_period >= span`` (a component smoother than the sampled interval)
+    and ``min_period ~ span / R_max`` for the highest resolution of interest
+    (R up to ~1e6 means periods down to ~1e-6 of the span).
+    """
+    import warnings
+
+    import numpy as np
+
+    from .transformer_payne import TransformerPayneConfig
+
+    try:
+        model_cfg = TransformerPayneConfig.from_dict(dict(cfg.model.params))
+    except Exception:
+        return
+    min_period = float(model_cfg.min_period)
+    max_period = float(model_cfg.max_period)
+
+    for wave in wavelength_arrays:
+        if wave is None:
+            continue
+        arr = np.asarray(wave, dtype=np.float64)
+        if arr.ndim != 1 or arr.size < 2:
+            continue
+        span = float(arr[-1] - arr[0])
+        finest_spacing = float(np.min(np.diff(arr)))
+        if span > max_period:
+            warnings.warn(
+                "The wavelength coordinate span "
+                f"({span:.6g}) exceeds the transformer's max_period "
+                f"({max_period:.6g}), so the frequency encoding has no "
+                "component smoother than the sampled interval. Affine-rescale "
+                "the wavelength coordinate so its span is of order 1.0 (for "
+                "example log10(wavelength) or a min-max scaled coordinate) "
+                "and/or choose max_period >= the coordinate span.",
+                stacklevel=3,
+            )
+        if finest_spacing > 0.0 and min_period > 10.0 * finest_spacing:
+            warnings.warn(
+                "The transformer's min_period "
+                f"({min_period:.6g}) is much larger than the finest wavelength "
+                f"grid spacing ({finest_spacing:.6g}), so the frequency "
+                "encoding cannot resolve structure at the grid scale. Choose "
+                "min_period ~ span / R_max for the highest resolution of "
+                "interest.",
+                stacklevel=3,
+            )
 
 
 class RuntimeAdapter(Protocol):
@@ -198,17 +253,6 @@ def _select_wavelength_leaf(input_leaf_paths: list[str]) -> str:
     return candidates[0]
 
 
-def _input_affine_leaf_specs(
-    role_paths: dict[str, str], affine_specs: AffineLeafSpecs
-) -> AffineLeafSpecs:
-    return {
-        path: affine_specs[path]
-        for key, path in role_paths.items()
-        if key.endswith("input_leaf")
-        or key in {"parameter_leaf", "wavelength_leaf", "input_leaf"}
-    }
-
-
 def _section_affine_leaf_specs(
     affine_specs: AffineLeafSpecs, *, section_name: str
 ) -> AffineLeafSpecs:
@@ -289,8 +333,113 @@ def _require_model_init_hint(model_init: dict[str, Any], key: str) -> int:
     return value
 
 
+class MinMaxValidatedAdapterMixin:
+    """Shared min/max-tree spec validation for adapters with affine_leaf_specs.
+
+    Requires the concrete adapter to provide
+    ``affine_leaf_specs(cfg=..., spec=..., model_init=...)``.
+    """
+
+    if TYPE_CHECKING:
+
+        def affine_leaf_specs(
+            self, *, cfg: Any, spec: dict[str, Any], model_init: dict[str, Any]
+        ) -> AffineLeafSpecs: ...
+
+    def validate_reference_scaling_inputs(
+        self,
+        *,
+        cfg,
+        spec: dict[str, Any],
+        scaling: dict[str, Any],
+        model_init: dict[str, Any],
+    ) -> None:
+        if (
+            not isinstance(scaling, dict)
+            or "min_tree" not in scaling
+            or "max_tree" not in scaling
+        ):
+            raise ValueError(
+                "reference_scaling_inputs must provide 'min_tree' and 'max_tree'."
+            )
+        specs = _section_affine_leaf_specs(
+            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
+            section_name="inputs",
+        )
+        _validate_affine_tree(
+            tree=scaling["min_tree"],
+            expected_specs=specs,
+            field_name="reference_scaling_inputs.min_tree",
+        )
+        _validate_affine_tree(
+            tree=scaling["max_tree"],
+            expected_specs=specs,
+            field_name="reference_scaling_inputs.max_tree",
+        )
+
+    def validate_reference_scaling_outputs(
+        self,
+        *,
+        cfg,
+        spec: dict[str, Any],
+        scaling: dict[str, Any],
+        model_init: dict[str, Any],
+    ) -> None:
+        if (
+            not isinstance(scaling, dict)
+            or "min_tree" not in scaling
+            or "max_tree" not in scaling
+        ):
+            raise ValueError(
+                "reference_scaling_outputs must provide 'min_tree' and 'max_tree'."
+            )
+        specs = _section_affine_leaf_specs(
+            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
+            section_name="outputs",
+        )
+        _validate_affine_tree(
+            tree=scaling["min_tree"],
+            expected_specs=specs,
+            field_name="reference_scaling_outputs.min_tree",
+        )
+        _validate_affine_tree(
+            tree=scaling["max_tree"],
+            expected_specs=specs,
+            field_name="reference_scaling_outputs.max_tree",
+        )
+
+    def validate_input_domain(
+        self,
+        *,
+        cfg,
+        spec: dict[str, Any],
+        domain: dict[str, Any],
+        model_init: dict[str, Any],
+    ) -> None:
+        if (
+            not isinstance(domain, dict)
+            or "min_tree" not in domain
+            or "max_tree" not in domain
+        ):
+            raise ValueError("input_domain must provide 'min_tree' and 'max_tree'.")
+        specs = _section_affine_leaf_specs(
+            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
+            section_name="inputs",
+        )
+        _validate_affine_tree(
+            tree=domain["min_tree"],
+            expected_specs=specs,
+            field_name="input_domain.min_tree",
+        )
+        _validate_affine_tree(
+            tree=domain["max_tree"],
+            expected_specs=specs,
+            field_name="input_domain.max_tree",
+        )
+
+
 @dataclass(frozen=True)
-class ArrayRuntimeAdapter:
+class ArrayRuntimeAdapter(MinMaxValidatedAdapterMixin):
     family_name: str = "array_family"
     default_input_leaf_key: str = "parameters"
     default_output_leaf_key: str = "predictions"
@@ -409,97 +558,6 @@ class ArrayRuntimeAdapter:
             },
         }
 
-    def validate_reference_scaling_inputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_inputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.max_tree",
-        )
-
-    def validate_reference_scaling_outputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_outputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="outputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.max_tree",
-        )
-
-    def validate_input_domain(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        domain: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(domain, dict)
-            or "min_tree" not in domain
-            or "max_tree" not in domain
-        ):
-            raise ValueError("input_domain must provide 'min_tree' and 'max_tree'.")
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=domain["min_tree"],
-            expected_specs=specs,
-            field_name="input_domain.min_tree",
-        )
-        _validate_affine_tree(
-            tree=domain["max_tree"],
-            expected_specs=specs,
-            field_name="input_domain.max_tree",
-        )
-
     def describe_runtime(
         self, *, cfg, spec: dict[str, Any], model_init: dict[str, Any]
     ) -> dict[str, Any]:
@@ -535,7 +593,21 @@ class CannonRuntimeAdapter(ArrayRuntimeAdapter):
 
 
 @dataclass(frozen=True)
-class TransformerPayneRuntimeAdapter:
+class TwoInputSpectralRuntimeAdapter(MinMaxValidatedAdapterMixin):
+    """Shared runtime adapter for explicit-wavelength (parameters + query
+    wavelengths -> spectrum) model families.
+
+    Concrete families set ``family_name`` and the default leaf keys; model
+    specifics (device batch transforms beyond the plain flux transform,
+    extra runtime-contract fields) are added by overriding
+    ``make_device_batch_transform`` / ``describe_runtime``.
+    """
+
+    family_name: str = "two_input_spectral"
+    default_input_leaf_key: str = "parameters"
+    default_wavelength_leaf_key: str = "wavelengths"
+    default_output_leaf_key: str = "flux"
+
     def resolve_init_context(
         self,
         *,
@@ -592,16 +664,19 @@ class TransformerPayneRuntimeAdapter:
         output_paths = _section_leaf_paths(spec, "outputs")
         if len(input_paths) != 2:
             raise ValueError(
-                f"transformer_payne requires exactly two input leaves, found {len(input_paths)}."
+                f"{self.family_name} requires exactly two input leaves, found {len(input_paths)}."
             )
         if len(output_paths) != 1:
             raise ValueError(
-                f"transformer_payne requires exactly one output leaf, found {len(output_paths)}."
+                f"{self.family_name} requires exactly one output leaf, found {len(output_paths)}."
             )
 
         wavelength_leaf = _select_wavelength_leaf(input_paths)
-        parameter_leaf = next(path for path in input_paths if path != wavelength_leaf)
-        del parameter_leaf  # derived to confirm resolution is unique
+        parameter_leaves = [path for path in input_paths if path != wavelength_leaf]
+        if len(parameter_leaves) != 1:
+            raise ValueError(
+                f"{self.family_name} requires exactly one non-wavelength parameter leaf."
+            )
 
         channels = int(dict(cfg.model.params).get("channels", 1))
         output_leaf = output_paths[0]
@@ -614,16 +689,16 @@ class TransformerPayneRuntimeAdapter:
         if channels == 1:
             if output_channel_names not in (None, []):
                 raise ValueError(
-                    "transformer_payne single-channel outputs must not declare multiple channel names."
+                    f"{self.family_name} single-channel outputs must not declare channel names."
                 )
             return
         if output_channel_names is None:
             raise ValueError(
-                "transformer_payne multi-channel outputs require output channel names metadata."
+                f"{self.family_name} multi-channel outputs require output channel names metadata."
             )
         if len(output_channel_names) != channels:
             raise ValueError(
-                "transformer_payne output channel_names_tree length "
+                f"{self.family_name} output channel_names_tree length "
                 f"({len(output_channel_names)}) must equal channels ({channels})."
             )
 
@@ -632,12 +707,18 @@ class TransformerPayneRuntimeAdapter:
         channels = int(dict(cfg.model.params).get("channels", 1))
         out["inputs"] = _merge_iotree_defaults(
             out.get("inputs"),
-            default_structure_tree={"parameters": None, "wavelengths": None},
+            default_structure_tree={
+                self.default_input_leaf_key: None,
+                self.default_wavelength_leaf_key: None,
+            },
         )
         out["outputs"] = _merge_iotree_defaults(
             out.get("outputs"),
-            default_structure_tree={"flux": None},
+            default_structure_tree={self.default_output_leaf_key: None},
         )
+        # Resolve the actual output leaf path before injecting default
+        # channel names: a user-supplied output structure may not use
+        # default_output_leaf_key.
         if channels > 1 and out["outputs"].get("channel_names_tree") is None:
             output_leaf_paths = _section_leaf_paths(out, "outputs")
             if len(output_leaf_paths) == 1:
@@ -666,7 +747,7 @@ class TransformerPayneRuntimeAdapter:
 
     def affine_leaf_specs(
         self, *, cfg, spec: dict[str, Any], model_init: dict[str, Any]
-    ) -> dict[str, dict[str, Any]]:
+    ) -> AffineLeafSpecs:
         role_paths = self.derive_role_paths(cfg=cfg, spec=spec)
         channels = int(dict(cfg.model.params).get("channels", 1))
         output_spec = (
@@ -684,96 +765,33 @@ class TransformerPayneRuntimeAdapter:
             role_paths["output_leaf"]: output_spec,
         }
 
-    def validate_reference_scaling_inputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_inputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_inputs.max_tree",
-        )
+    def make_device_batch_transform(
+        self, *, cfg, spec: dict[str, Any], **kwargs: Any
+    ) -> DeviceBatchTransform:
+        from .transformer_payne_batch import make_flux_batch_transform
 
-    def validate_reference_scaling_outputs(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        scaling: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(scaling, dict)
-            or "min_tree" not in scaling
-            or "max_tree" not in scaling
-        ):
-            raise ValueError(
-                "reference_scaling_outputs must provide 'min_tree' and 'max_tree'."
-            )
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="outputs",
-        )
-        _validate_affine_tree(
-            tree=scaling["min_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.min_tree",
-        )
-        _validate_affine_tree(
-            tree=scaling["max_tree"],
-            expected_specs=specs,
-            field_name="reference_scaling_outputs.max_tree",
-        )
+        role_paths = self.derive_role_paths(cfg=cfg, spec=spec)
+        kwargs.setdefault("parameter_role_path", role_paths["parameter_leaf"])
+        kwargs.setdefault("wavelength_role_path", role_paths["wavelength_leaf"])
+        kwargs.setdefault("output_role_path", role_paths["output_leaf"])
+        return make_flux_batch_transform(**kwargs)
 
-    def validate_input_domain(
-        self,
-        *,
-        cfg,
-        spec: dict[str, Any],
-        domain: dict[str, Any],
-        model_init: dict[str, Any],
-    ) -> None:
-        if (
-            not isinstance(domain, dict)
-            or "min_tree" not in domain
-            or "max_tree" not in domain
-        ):
-            raise ValueError("input_domain must provide 'min_tree' and 'max_tree'.")
-        specs = _section_affine_leaf_specs(
-            self.affine_leaf_specs(cfg=cfg, spec=spec, model_init=model_init),
-            section_name="inputs",
-        )
-        _validate_affine_tree(
-            tree=domain["min_tree"],
-            expected_specs=specs,
-            field_name="input_domain.min_tree",
-        )
-        _validate_affine_tree(
-            tree=domain["max_tree"],
-            expected_specs=specs,
-            field_name="input_domain.max_tree",
-        )
+    def describe_runtime(
+        self, *, cfg, spec: dict[str, Any], model_init: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "surface": "canonical_dict_trees_v1",
+            "role_paths": self.derive_role_paths(cfg=cfg, spec=spec),
+            "affine_leaf_specs": self.affine_leaf_specs(
+                cfg=cfg, spec=spec, model_init=model_init
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class TransformerPayneRuntimeAdapter(TwoInputSpectralRuntimeAdapter):
+    family_name: str = "transformer_payne"
+    default_output_leaf_key: str = "flux"
 
     def make_device_batch_transform(
         self, *, cfg, spec: dict[str, Any], **kwargs: Any
@@ -790,6 +808,16 @@ class TransformerPayneRuntimeAdapter:
         kwargs.setdefault("wavelength_role_path", role_paths["wavelength_leaf"])
         kwargs.setdefault("output_role_path", role_paths["output_leaf"])
         kwargs.setdefault("wavelength_dtype", "float64")
+        if mode == "intensity" or channels > 1:
+            common_waves = kwargs.get("common_waves")
+            wave_arrays = (
+                tuple(common_waves.values())
+                if isinstance(common_waves, Mapping)
+                else ()
+            )
+        else:
+            wave_arrays = (kwargs.get("wavelength_grid"),)
+        _warn_on_frequency_encoding_span_mismatch(cfg, wavelength_arrays=wave_arrays)
         if mode == "intensity" or channels > 1:
             output_channel_names = _metadata_leaf_for_role(
                 spec,
@@ -816,16 +844,10 @@ class TransformerPayneRuntimeAdapter:
     def describe_runtime(
         self, *, cfg, spec: dict[str, Any], model_init: dict[str, Any]
     ) -> dict[str, Any]:
-        role_paths = self.derive_role_paths(cfg=cfg, spec=spec)
-        runtime: dict[str, Any] = {
-            "surface": "canonical_dict_trees_v1",
-            "role_paths": role_paths,
-            "affine_leaf_specs": self.affine_leaf_specs(
-                cfg=cfg, spec=spec, model_init=model_init
-            ),
-        }
+        runtime = super().describe_runtime(cfg=cfg, spec=spec, model_init=model_init)
         channels = int(dict(cfg.model.params).get("channels", 1))
         if channels > 1:
+            role_paths = runtime["role_paths"]
             output_channel_names = _metadata_leaf_for_role(
                 spec,
                 section_name="outputs",

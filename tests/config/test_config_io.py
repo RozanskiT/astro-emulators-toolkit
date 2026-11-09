@@ -339,6 +339,14 @@ def test_root_config_canonicalizes_registry_names():
         ({"precondition_frequency": 0}, "optim.precondition_frequency must be > 0"),
         ({"scale_embedding_lr": -1.0}, "optim.scale_embedding_lr must be >= 0"),
         ({"lr_scaling": "wide"}, "optim.lr_scaling must be"),
+        ({"lr_scaling": "standard"}, "optim.lr_scaling='standard' is ambiguous"),
+        ({"scale_embedding_lr": 0.5}, "no effect when optim.lr_scaling is None"),
+        ({"warmup_steps": -1}, "optim.warmup_steps must be >= 0"),
+        ({"decay_steps": -1}, "optim.decay_steps must be >= 0"),
+        (
+            {"schedule": "cosine", "decay_steps": 5},
+            "only used by the 'wsd' schedule",
+        ),
     ],
 )
 def test_optim_config_rejects_invalid_numeric_constraints(kwargs, match):
@@ -346,12 +354,18 @@ def test_optim_config_rejects_invalid_numeric_constraints(kwargs, match):
         OptimConfig(**kwargs)
 
 
+def test_optim_config_keeps_si_as_first_class_lr_scaling():
+    cfg = OptimConfig(lr_scaling=" SI ", scale_embedding_lr=0.263)
+
+    assert cfg.lr_scaling == "si"
+    assert cfg.scale_embedding_lr == 0.263
+
+
 @pytest.mark.parametrize(
     ("kwargs", "match"),
     [
         ({"batch_size": 0}, "training.batch_size must be > 0"),
         ({"num_steps": -1}, "training.num_steps must be >= 0"),
-        ({"val_fraction": 1.5}, "training.val_fraction must satisfy"),
         ({"steps_per_epoch": 0}, "training.steps_per_epoch must be > 0 or None"),
     ],
 )
@@ -524,3 +538,26 @@ def test_train_config_rejects_non_positive_explicit_step_schedules():
         ValueError, match="training.checkpoint_steps\\[1\\] must be > 0"
     ):
         RootConfig(training=TrainConfig(checkpoint_steps=[10, 0]))
+
+
+def test_with_updates_accepts_section_dicts():
+    cfg = RootConfig()
+
+    updated = cfg.with_updates(
+        training={"num_steps": 500, "batch_size": 64},
+        optim={"lr": 3e-4},
+    )
+
+    assert updated.training.num_steps == 500
+    assert updated.training.batch_size == 64
+    # untouched fields of the section are preserved
+    assert updated.training.workdir == cfg.training.workdir
+    assert updated.optim.lr == pytest.approx(3e-4)
+    assert updated.optim.name == cfg.optim.name
+    # original is unchanged
+    assert cfg.training.num_steps == 1000
+
+
+def test_optim_config_warns_when_si_is_effectively_a_noop():
+    with pytest.warns(UserWarning, match="equivalent to lr_scaling=None"):
+        OptimConfig(lr_scaling="si", scale_embedding_lr=1.0)

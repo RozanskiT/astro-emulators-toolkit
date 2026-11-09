@@ -74,9 +74,21 @@ class CanonicalTransformerModelWrapper(nnx.Module):
             params = _extract_leaf(
                 x, self.parameter_role_path, section_name="inputs", field_name="input"
             )
-            wavelengths = _extract_leaf(
-                x, self.wavelength_role_path, section_name="inputs", field_name="input"
-            )
+            try:
+                wavelengths = _extract_leaf(
+                    x,
+                    self.wavelength_role_path,
+                    section_name="inputs",
+                    field_name="input",
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    f"{exc} During fit(...), this leaf is normally injected by "
+                    "a device batch transform: build one with "
+                    "emu.make_device_batch_transform(wavelength_grid=..., "
+                    "n_wavelength=...) and pass it as "
+                    "fit(device_batch_transform=...)."
+                ) from exc
             pred = self.core_model((params, wavelengths), train=train, rngs=rngs)
             return _wrap_output(self.output_role_path, pred, section_name="outputs")
         return self.core_model(x, train=train, rngs=rngs)

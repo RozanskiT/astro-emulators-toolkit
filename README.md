@@ -167,6 +167,8 @@ Core data-layer building blocks:
 - `train_val_split(...)`
 - `SubsetDataset`
 - `DataLoader`
+- `pack_xy_as_tree(...)` (host-side mapping of raw x/y arrays to canonical trees)
+- `IdentityDeviceBatchTransform`
 
 The intended split is:
 
@@ -183,6 +185,8 @@ Training callbacks and helpers:
 - `CSVLogger`
 - `ProgressBarLogger`
 - `ModelCheckpoint`
+- `BestModelCheckpoint` (best-metric tracking; see the training notes)
+- `Callback` (base class for custom callbacks), `History`, `TrainState`
 
 `ModelCheckpoint` belongs to run management for ongoing training. It is not the collaborator-facing distribution artifact; that role belongs to bundles saved with `save_bundle(...)`.
 
@@ -372,12 +376,11 @@ The typical supported training path is:
 4. save a portable bundle with `save_bundle(...)`.
 
 ```python
-from astro_emulators_toolkit import Emulator
+from astro_emulators_toolkit import Emulator, normalize_tree
 from astro_emulators_toolkit.data import TreeArrayDataset
 from astro_emulators_toolkit.presets import payne_flux_mlp
-from astro_emulators_toolkit.training import build_callbacks_from_config
 
-# x_train, x_val: (n_samples, n_labels)
+# x_train, x_val: (n_samples, n_labels) in physical units
 # y_train, y_val: (n_samples, n_wavelengths)
 
 cfg = payne_flux_mlp(
@@ -385,22 +388,47 @@ cfg = payne_flux_mlp(
     profile="cpu_recommended",
 )
 
-emu = Emulator.from_config(cfg)
-callbacks = build_callbacks_from_config(cfg)
+# MLP presets expect roughly unit-scaled inputs: min-max scale the labels and
+# record the scaling in the bundle so consumers can reproduce it.
+min_tree = {"parameters": x_train.min(axis=0)}
+max_tree = {"parameters": x_train.max(axis=0)}
 
+emu = Emulator.from_config(cfg)
 history = emu.fit(
-    TreeArrayDataset(x={"parameters": x_train}, y={"flux": y_train}),
-    validation_dataset=TreeArrayDataset(x={"parameters": x_val}, y={"flux": y_val}),
-    callbacks=callbacks,
+    TreeArrayDataset(
+        x=normalize_tree({"parameters": x_train}, min_tree, max_tree),
+        y={"flux": y_train},
+    ),
+    validation_dataset=TreeArrayDataset(
+        x=normalize_tree({"parameters": x_val}, min_tree, max_tree),
+        y={"flux": y_val},
+    ),
 )
 
-pred = emu.predict({"parameters": x_val[:2]})["flux"]
-bundle_dir = emu.save_bundle()
+pred = emu.predict(normalize_tree({"parameters": x_val[:2]}, min_tree, max_tree))
+bundle_dir = emu.save_bundle(
+    spec={
+        "reference_scaling_inputs": {
+            "kind": "affine_minmax_v1",
+            "applies_to": "inputs",
+            "source_space": "physical_input_dict_tree_v1",
+            "target_space": "canonical_input_dict_tree_v1",
+            "min_tree": {"parameters": [float(v) for v in min_tree["parameters"]]},
+            "max_tree": {"parameters": [float(v) for v in max_tree["parameters"]]},
+        },
+    }
+)
 
 print(sorted(history.logs))
-print(pred.shape)
+print(pred["flux"].shape)
 print(bundle_dir)
 ```
+
+Config-declared progress, evaluation, and checkpoint callbacks are built
+automatically (`fit(callbacks=None)`); pass `callbacks=[]` to disable them or
+an explicit list to take control. Saving `reference_scaling_inputs` closes
+the loop with the consumer workflow above: the bundle documents exactly how
+to map physical labels into the emulator's training space.
 
 ### Training notes
 
@@ -411,7 +439,42 @@ print(bundle_dir)
 - For `closed_form_linear`, a scalar target leaf with shape `(N,)` is treated as one output channel; fitted coefficients and predictions keep an explicit trailing dimension of 1.
 - Presets use `profile="smoke"` for short example runs and `profile="cpu_recommended"` for longer CPU-oriented defaults.
 - Training and inference are tested for CPU/single-device JAX execution. Single-GPU execution should work with a correct JAX GPU installation. Multi-GPU training is not yet part of the stable contract; the current trainer does not shard batches or replicate/partition training state across devices.
-- Use `build_callbacks_from_config(cfg)` when you want config-driven progress, evaluation, and run-state callbacks.
+- `training.checkpoint_interval_steps=0` (or `None`, with no explicit
+  `checkpoint_steps`) disables periodic checkpointing entirely;
+  `max_saved_checkpoints` only controls retention of saved checkpoints and
+  never enables or disables checkpointing.
+- `fit(callbacks=None)` builds config-declared callbacks with
+  `build_callbacks_from_config(cfg)` by default, so
+  `training.checkpoint_interval_steps` and progress logging take effect
+  without extra wiring. Pass `callbacks=[]` to run without callbacks, or an
+  explicit list to take full control.
+- The default learning-rate schedule is cosine decay with automatic linear
+  warmup over the first 10% of `training.num_steps`
+  (`optim.warmup_steps=None`). Set `optim.warmup_steps` explicitly to
+  override, `0` to disable warmup, or `optim.schedule="constant"` for a fixed
+  learning rate.
+- Run provenance: the first `fit(...)` writes `run_config.json` in the
+  workdir; later fits never overwrite it (a changed config is recorded as
+  `run_config.resume-N.json`), and every `fit(...)` appends the effective
+  choices — resolved solver, optimizer source (config vs
+  `configure_training` override), optim settings, toolkit version — to
+  `effective_runs.jsonl`.
+- Best-model tracking: set `training.checkpoint_best_metric` (the bare
+  eval-metric name, e.g. `"loss"` or `"mae"` — a `validation_` prefix from
+  history keys is accepted and stripped — with `checkpoint_best_mode`
+  `"min"`/`"max"`) and the single best
+  `TrainState` — judged on validation metrics — is kept under
+  `checkpoints_best/` in the workdir, separate from the resume checkpoints.
+  After training, `emu.load_best_checkpoint()` restores it; a typical flow is
+  `fit(...)` → `load_best_checkpoint()` → `save_bundle(...)`.
+- Resuming continues the LR schedule from the restored optimizer step. A
+  resume with a changed optimizer/schedule config (including a different
+  `training.num_steps`, which reshapes cosine decay) emits a warning based on
+  the fingerprint stored in the checkpoint, and `resume=True` with no
+  checkpoint found warns before training from scratch. `CSVLogger` appends to
+  an existing file on resume instead of truncating it.
+- `training.async_checkpointing=False` forces synchronous orbax checkpoint
+  writes — useful when bisecting GPU instability.
 
 ### Advanced training: learning-rate scaling
 
@@ -424,6 +487,11 @@ scientific validation.
 
 Supported settings are:
 
+- `transformer_payne` with `optim.lr_scaling="si"`: legacy standard
+  parameterization. Parameter-embedding groups train at
+  `lr * optim.scale_embedding_lr`; all other groups keep the base learning
+  rate. No reference width is required and, unlike `mup`, the output
+  embedding is not width-divided.
 - `mlp` with `optim.lr_scaling="mup"`: requires `model.params.reference_width`.
   Dense kernels are scaled by the ratio between the reference width and the
   current hidden width; biases and otherwise unclassified parameters keep the
@@ -435,9 +503,20 @@ Supported settings are:
   requires `model.params.reference_depth` and applies the depth factor to the
   attention and feed-forward blocks.
 
-`optim.scale_embedding_lr` is available for Transformer Payne parameter
-embedding layers. `optim.grad_clip=0.0`, the default, disables gradient clipping;
-set a positive value to clip by global norm before the optimizer update.
+`optim.scale_embedding_lr` scales the Transformer Payne parameter-embedding
+learning rate and is only meaningful with `lr_scaling` set to `"si"`, `"mup"`,
+or `"mup_depth"`; setting it with `lr_scaling=None` is a config error rather
+than a silently ignored knob. `optim.lr_scaling="standard"` is rejected as
+ambiguous — use `None` for one shared learning rate or `"si"` for the legacy
+standard parameterization. `optim.grad_clip=0.0`, the default, disables
+gradient clipping; set a positive value to clip by global norm before the
+optimizer update. Note that `optim.b1` doubles as the SGD momentum when
+`optim.name="sgd"`.
+
+Schedule endpoint convention: for `cosine` and `wsd`, every applied step uses
+a strictly positive learning rate. Warmup ramps `lr/warmup_steps, ...` up to
+`lr`, and decay reaches exactly zero only one step past the final applied
+optimizer step, so no training step is wasted on a zero learning rate.
 
 Representative examples:
 
@@ -584,7 +663,8 @@ Use `from_config(...)` when building a new emulator. Use `from_bundle(...)` or `
 ### Training and packaging
 
 - `configure_training(optimizer=None, task=None)` for advanced training overrides. It only attaches a task object and/or optimizer for later `fit(...)`; it does not JIT/XLA-compile the model.
-- `fit(train_dataset, validation_dataset=None, callbacks=None, resume=False, max_steps=None, device_batch_transform=None, method=None)`;
+- `fit(train_dataset, validation_dataset=None, callbacks=None, resume=False, max_steps=None, device_batch_transform=None, method=None)`; `method` accepts a solver registry name (`"gradient"` or `"closed_form_linear"`) to override `cfg.solver.name` for one call.
+- `load_best_checkpoint()` to restore the best-metric snapshot tracked during `fit(...)` (see `training.checkpoint_best_metric`).
 - `save_bundle(path=None, spec=None, extras=None)`.
 
 ### Metadata accessors
@@ -609,27 +689,23 @@ Use `from_config(...)` when building a new emulator. Use `from_bundle(...)` or `
 - `bundle`: bundle-export options;
 - `hub`: Hugging Face bundle source metadata.
 
-A good default pattern is to start from a preset and then replace the pieces you need.
+A good default pattern is to start from a preset and then update the pieces
+you need with `with_updates(...)`. A section can be given as a dict of field
+updates, which are merged into the existing section:
 
 ```python
-from dataclasses import replace
-
+from astro_emulators_toolkit.config import IOTreeSpec
 from astro_emulators_toolkit.presets import payne_flux_mlp
-from astro_emulators_toolkit.config import IOSpec, IOTreeSpec
 
 cfg0 = payne_flux_mlp(workdir="runs/demo", profile="cpu_recommended")
-cfg = replace(
-    cfg0,
-    io=IOSpec(
-        inputs=IOTreeSpec(
+cfg = cfg0.with_updates(
+    training={"num_steps": 500, "batch_size": 64},
+    io={
+        "inputs": IOTreeSpec(
             structure_tree={"parameters": None},
             channel_names_tree={"parameters": ["teff", "logg", "feh"]},
-        ),
-        outputs=cfg0.io.outputs,
-        reference_scaling_inputs=cfg0.io.reference_scaling_inputs,
-        reference_scaling_outputs=cfg0.io.reference_scaling_outputs,
-        input_domain=cfg0.io.input_domain,
-    ),
+        )
+    },
 )
 ```
 
@@ -646,7 +722,7 @@ cfg = load_config("runs/demo/config.yaml")
 
 ### Stable model families
 
-- `mlp`: general dense regression model. This is the basis for the stable Payne-style flux example and the stable isochrone example.
+- `mlp`: general dense regression model. This is the basis for the stable Payne-style flux example and the stable isochrone example. `model.params.dtype` is the compute dtype and `model.params.param_dtype` the parameter storage dtype (default: same as `dtype`); `dtype="bfloat16"` with `param_dtype="float32"` is the usual mixed-precision setup.
 - `cannon`: closed-form quadratic baseline. Useful as a simple reference model and regression baseline, with an optional intercept term that is left unregularized by default in the closed-form solver.
 - `transformer_payne`: wavelength-explicit spectral/intensity model family with runtime helpers for explicit wavelength handling.
 
@@ -658,13 +734,38 @@ cfg = load_config("runs/demo/config.yaml")
 
 Prototype model families and tasks live under `experimental/...`. They are useful for research and development but are intentionally outside the stable public contract.
 
-### Transformer-specific note
+### Transformer-specific notes
 
-`transformer_payne` examples keep the wavelength interpolation/encoding path in float64 until the final embedding cast. For those workflows, enable:
+The `transformer_payne` family **requires** `JAX_ENABLE_X64=1`: wavelengths are always handled in float64 up to the embedding cast, and model construction fails without it. Enable it before building or loading these models:
 
 ```bash
 export JAX_ENABLE_X64=1
 ```
+
+**Wavelength coordinate convention.** The model is coordinate-agnostic: it
+never assumes Angstroms, nanometers, or log wavelengths. What matters is how
+the coordinate relates to the frequency-encoding periods:
+
+- prefer an affine-scaled coordinate whose **span is of order 1.0** (for
+  example `log10(wavelength)` or a min-max scaled coordinate), because the
+  library favors explicit affine scaling;
+- choose `max_period` at least as large as the coordinate span, so the
+  encoding has a component smoother than the sampled interval;
+- choose `min_period` around `span / R_max` for the highest resolution of
+  interest — spectral resolutions up to ~1e6 mean periods down to ~1e-6 of
+  the span.
+
+`make_device_batch_transform(...)` warns when the wavelength grid and the
+configured periods are inconsistent with this convention (span larger than
+`max_period`, or `min_period` far coarser than the finest grid spacing).
+
+**Validation protocol.** By default, evaluation broadcasts one shared
+`eval_wavelength_grid` to every spectrum. For parity with per-example
+random-wavelength validation protocols, pass `eval_mode="passthrough"` to
+`make_device_batch_transform(...)`: eval batches are then used exactly as the
+validation dataset provides them (precomputed per-example query wavelengths
+and matching targets), while training batches are still transformed with
+random wavelength sampling.
 
 See [`examples/basic/07_train_transformer_payne_flux.py`](examples/basic/07_train_transformer_payne_flux.py) and [`examples/advanced/03_train_transformer_payne_intensity.py`](examples/advanced/03_train_transformer_payne_intensity.py).
 
@@ -1020,6 +1121,42 @@ Common metadata fields exposed on load include:
 - `release` identity if the bundle has been prepared as a release;
 - `provenance` such as toolkit version, Python version, creation time, and git commit;
 - optional `fingerprint_evaluation` descriptors.
+
+## Bundle compatibility and versioning
+
+Bundles are meant to outlive toolkit versions. The compatibility contract is
+defined in one place — `src/astro_emulators_toolkit/bundle/versions.py` — and
+works as follows:
+
+- Four version fields identify a bundle: `bundle_format_version` (on-disk
+  layout and metadata envelope), `config_schema_version` (saved
+  `config.json` schema), `spec.spec_version` (I/O spec block semantics), and
+  `weights_layout` (the parameter-tree contract inside the safetensors file,
+  including the canonical-wrapper `core_model` nesting).
+- Saving stamps the current versions; loading accepts every version listed
+  in the `SUPPORTED_*` collections and rejects anything else with an error
+  that names the supported versions.
+- Older-but-supported bundle formats are upgraded **in memory** at load time
+  through the migration registry (`BUNDLE_METADATA_MIGRATIONS`); the on-disk
+  bundle is never modified by loading.
+- Older config schemas are upgraded the same way
+  (`src/astro_emulators_toolkit/config/migrations.py`), for bundles and for
+  `load_config(...)`. Config schema v1 was written by toolkit 0.1.x and v2 by
+  0.2.0+. (The 0.2.0 pre-releases, `0.2.0.devN`, still stamped v1 but wrote
+  v2 meaning; bundles record the toolkit version, so they load as v2.) A v1
+  document keeps its v1 meaning: the removed `training.val_fraction` key is
+  dropped, absent keys get the v1
+  defaults (constant learning rate, no warmup), non-float32 MLP-style models
+  keep float32 parameter storage, and settings that 0.1.x accepted but
+  ignored (`scale_embedding_lr` without `lr_scaling`, `decay_steps` with the
+  cosine schedule, `solver.params` for the gradient solver,
+  `lr_scaling="si"`/`"standard"` as aliases for `None`) are replaced by the
+  value that was in effect, listed in one `LegacyConfigWarning`. The same
+  settings in a v2 document are errors. Re-saving a loaded v1 bundle writes
+  a v2 bundle.
+- Every version bump must either extend the supported window with a
+  registered migration or be an explicit, CHANGELOG-documented hard break.
+  Dropping a version from a supported window is itself a breaking change.
 
 ## Bundles versus internal training state
 

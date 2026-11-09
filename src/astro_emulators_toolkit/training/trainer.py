@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
+import json
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -10,7 +13,8 @@ import numpy as np
 import optax
 from flax import nnx
 
-from ..config.io import save_config
+from ..config.io import _to_jsonable
+from ..config.schema import canonicalize_config_names
 from ..data.loader import DataLoader
 from ..data.protocols import (
     Batch,
@@ -19,7 +23,13 @@ from ..data.protocols import (
 )
 from ..utils.tree import logs_device_to_python, to_jax_tree
 from ..training.state import TrainState
-from .callbacks import Callback, History, ModelCheckpoint, _HistoryCallback
+from .callbacks import (
+    BestModelCheckpoint,
+    Callback,
+    History,
+    ModelCheckpoint,
+    _HistoryCallback,
+)
 from .paths import RUN_CONFIG_FILENAME
 
 
@@ -47,6 +57,16 @@ class _CheckpointProxy:
 
         return ckpt_module.restore_latest(*args, **kwargs)
 
+    def latest_custom_metadata(self, *args, **kwargs):
+        from ..training import checkpoint as ckpt_module
+
+        return ckpt_module.latest_custom_metadata(*args, **kwargs)
+
+    def create_best_manager(self, *args, **kwargs):
+        from ..training import checkpoint as ckpt_module
+
+        return ckpt_module.create_best_manager(*args, **kwargs)
+
 
 ckpt = _CheckpointProxy()
 
@@ -55,16 +75,59 @@ def _to_jax_batch(batch: Batch) -> Batch:
     return cast(Batch, to_jax_tree(batch))
 
 
+# Force a host<->device synchronization point at this step cadence so Python
+# dispatch cannot run unboundedly ahead of the accelerator between sparse
+# logging/eval events (in-flight executables and transfer buffers otherwise
+# accumulate alongside orbax's async checkpoint thread on long runs).
+_BACKPRESSURE_SYNC_INTERVAL_STEPS = 128
+
+
 def _maybe_copy_to_host_async(tree: Any) -> Any:
     def _request_copy(x: Any) -> Any:
         if hasattr(x, "copy_to_host_async"):
-            try:
-                x.copy_to_host_async()
-            except Exception:
-                pass
+            x.copy_to_host_async()
         return x
 
     return jax.tree_util.tree_map(_request_copy, tree)
+
+
+def _config_json_payload(cfg) -> str:
+    payload = _to_jsonable(canonicalize_config_names(cfg))
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _record_run_config(cfg, workdir: Path) -> None:
+    """Record the run config without destroying earlier segments' provenance.
+
+    The first fit writes ``run_config.json``. A later fit in the same workdir
+    (e.g. a resumed run) with an identical config records nothing new; a
+    changed config is written as ``run_config.resume-N.json`` next to the
+    original instead of overwriting it.
+    """
+    payload = _config_json_payload(cfg)
+    target = workdir / RUN_CONFIG_FILENAME
+    if not target.exists():
+        target.write_text(payload)
+        return
+    if target.read_text() == payload:
+        return
+    index = 1
+    while True:
+        candidate = workdir / f"run_config.resume-{index}.json"
+        if not candidate.exists():
+            candidate.write_text(payload)
+            return
+        if candidate.read_text() == payload:
+            return
+        index += 1
+
+
+def _optimizer_fingerprint(cfg, *, external_optimizer: bool) -> dict[str, Any]:
+    return {
+        "optim": _to_jsonable(dataclasses.asdict(cfg.optim)),
+        "num_steps": int(cfg.training.num_steps),
+        "external_optimizer": bool(external_optimizer),
+    }
 
 
 def _merge_batch_metadata(original_batch: Batch, transformed_batch: Batch) -> Batch:
@@ -135,11 +198,16 @@ def fit(
     resume: bool = False,
     max_steps: int | None = None,
     device_batch_transform: DeviceBatchTransformLike | None = None,
+    external_optimizer: bool = False,
 ) -> FitResult:
     """Run the gradient-training loop and return the recorded history and state."""
     workdir = Path(cfg.training.workdir).resolve()
     workdir.mkdir(parents=True, exist_ok=True)
-    save_config(cfg, workdir / RUN_CONFIG_FILENAME)
+    _record_run_config(cfg, workdir)
+
+    optimizer_fingerprint = _optimizer_fingerprint(
+        cfg, external_optimizer=external_optimizer
+    )
 
     history = History()
     cb: list[Callback] = [_HistoryCallback(history)]
@@ -148,6 +216,23 @@ def fit(
 
     model_checkpoint_callbacks = [c for c in cb if isinstance(c, ModelCheckpoint)]
     log_callbacks = [c for c in cb if not isinstance(c, ModelCheckpoint)]
+
+    best_checkpoint_callbacks = [c for c in cb if isinstance(c, BestModelCheckpoint)]
+    if len(best_checkpoint_callbacks) > 1:
+        raise ValueError(
+            "At most one BestModelCheckpoint callback is supported per fit."
+        )
+    best_cb = best_checkpoint_callbacks[0] if best_checkpoint_callbacks else None
+    best_mngr = None
+    best_value: float | None = None
+    if best_cb is not None and val_dataset is not None:
+        best_mngr = ckpt.create_best_manager(workdir, cfg=cfg)
+        if resume:
+            best_meta = ckpt.latest_custom_metadata(best_mngr) or {}
+            if best_meta.get("monitor") == best_cb.monitor:
+                previous_best = best_meta.get("best_value")
+                if isinstance(previous_best, (int, float)):
+                    best_value = float(previous_best)
 
     mngr = None
     if resume or model_checkpoint_callbacks:
@@ -158,8 +243,29 @@ def fit(
         if mngr is None:
             raise RuntimeError("Checkpoint manager is required when resume=True.")
         restored = ckpt.restore_latest(mngr, target=init_state)
-        if restored is not None:
+        if restored is None:
+            warnings.warn(
+                f"resume=True but no checkpoint was found under '{workdir}'; "
+                "training starts from scratch.",
+                stacklevel=2,
+            )
+        else:
             state = restored
+            saved_meta = ckpt.latest_custom_metadata(mngr) or {}
+            saved_fingerprint = saved_meta.get("optimizer_fingerprint")
+            if (
+                saved_fingerprint is not None
+                and saved_fingerprint != optimizer_fingerprint
+            ):
+                warnings.warn(
+                    "Resuming with an optimizer/schedule configuration that "
+                    "differs from the one recorded in the checkpoint. The LR "
+                    "schedule shape depends on optim settings and "
+                    "training.num_steps, so the resumed run may not continue "
+                    f"the original schedule. Checkpoint: {saved_fingerprint}. "
+                    f"Current: {optimizer_fingerprint}.",
+                    stacklevel=2,
+                )
 
     @jax.jit
     def train_step(state: TrainState, batch: Batch):
@@ -243,18 +349,23 @@ def fit(
         interval_steps=cfg.training.evaluation_interval_steps,
         explicit_steps=cfg.training.evaluation_steps,
     )
+    evaluation_enabled = (
+        cfg.training.evaluation_interval_steps is not None
+        or cfg.training.evaluation_steps is not None
+    )
     if max_steps is not None and int(max_steps) <= 0:
         raise ValueError("max_steps must be > 0 when provided.")
 
-    for c in cb:
-        c.on_train_begin({})
-
     host_step = int(jax.device_get(state.step))
+    for c in cb:
+        c.on_train_begin({"resume": resume, "start_step": host_step})
+
     effective_target_steps = (
         num_steps if max_steps is None else min(num_steps, host_step + int(max_steps))
     )
     completed_steps = host_step
     pending_train: tuple[int, dict[str, Any]] | None = None
+    best_monitor_missing_warned = False
 
     def _flush_pending_train(step: int, logs: dict[str, Any]) -> None:
         if not should_emit_train_logs(step):
@@ -263,85 +374,149 @@ def fit(
         for callback in log_callbacks:
             callback.on_train_batch_end(step, logs_python)
 
-    while completed_steps < effective_target_steps:
-        epoch = completed_steps // steps_per_epoch
-        for c in cb:
-            c.on_epoch_begin(epoch, {})
+    def _dispatch_checkpoint_end(step: int, path: str) -> None:
+        for listener in cb:
+            listener.on_checkpoint_end(step, path)
 
-        epoch_end = min((epoch + 1) * steps_per_epoch, effective_target_steps)
-        while completed_steps < epoch_end:
-            batch = _to_jax_batch(train_loader.train_batch(completed_steps))
-            state, logs = train_step(state, batch)
-            host_step += 1
-            logs = _maybe_copy_to_host_async(logs)
+    try:
+        while completed_steps < effective_target_steps:
+            epoch = completed_steps // steps_per_epoch
+            for c in cb:
+                c.on_epoch_begin(epoch, {})
 
-            for c in model_checkpoint_callbacks:
-                if mngr is None or not c.should_save(host_step):
-                    continue
-                path = ckpt.save(
-                    mngr, host_step, state, custom_metadata={"step": int(host_step)}
-                )
-                if path is not None:
-                    c.on_checkpoint_end(host_step, path)
+            epoch_end = min((epoch + 1) * steps_per_epoch, effective_target_steps)
+            while completed_steps < epoch_end:
+                batch = _to_jax_batch(train_loader.train_batch(completed_steps))
+                state, logs = train_step(state, batch)
+                host_step += 1
+                if should_emit_train_logs(host_step):
+                    logs = _maybe_copy_to_host_async(logs)
+                if host_step % _BACKPRESSURE_SYNC_INTERVAL_STEPS == 0:
+                    jax.block_until_ready(state.step)
+
+                for c in model_checkpoint_callbacks:
+                    if mngr is None or not c.should_save(host_step):
+                        continue
+                    path = ckpt.save(
+                        mngr,
+                        host_step,
+                        state,
+                        custom_metadata={
+                            "step": int(host_step),
+                            "optimizer_fingerprint": optimizer_fingerprint,
+                        },
+                    )
+                    if path is not None:
+                        _dispatch_checkpoint_end(host_step, path)
+
+                if pending_train is not None:
+                    prev_step, prev_logs = pending_train
+                    _flush_pending_train(prev_step, prev_logs)
+                pending_train = (host_step, logs)
+
+                # When evaluation is enabled, the final trained state always
+                # gets validation metrics, even when num_steps does not land
+                # on the evaluation cadence. Explicitly disabled evaluation
+                # (interval None, no explicit steps) stays disabled.
+                if val_loader is not None and (
+                    should_run_eval(host_step)
+                    or (evaluation_enabled and host_step == effective_target_steps)
+                ):
+                    if all(
+                        hasattr(task, n)
+                        for n in (
+                            "init_eval_state",
+                            "update_eval_state",
+                            "finalize_eval",
+                        )
+                    ):
+                        eval_state = task.init_eval_state()
+                        for vb_np in val_loader.iter_eval_batches():
+                            vb = _to_jax_batch(vb_np)
+                            pred, vb = eval_predict(state, vb)
+                            eval_state = task.update_eval_state(eval_state, pred, vb)
+                        agg = logs_device_to_python(task.finalize_eval(eval_state))
+                    else:
+                        sums: dict[str, float] = {}
+                        denom = 0.0
+                        for vb_np in val_loader.iter_eval_batches():
+                            vb = _to_jax_batch(vb_np)
+                            pred, vb = eval_predict(state, vb)
+                            loss, metrics = task.loss_and_metrics(pred, vb)
+                            logs_eval = {"loss": loss, **metrics}
+                            w = float(np.asarray(vb_np["valid_mask"]).sum())
+                            denom += w
+                            h = logs_device_to_python(logs_eval)
+                            for k, v in h.items():
+                                sums[k] = sums.get(k, 0.0) + float(v) * w
+                        agg = {k: v / max(denom, 1e-12) for k, v in sums.items()}
+                    for c in cb:
+                        c.on_eval_end(host_step, agg)
+
+                    if best_mngr is not None and best_cb is not None:
+                        monitored = agg.get(best_cb.monitor)
+                        if monitored is None:
+                            if not best_monitor_missing_warned:
+                                best_monitor_missing_warned = True
+                                warnings.warn(
+                                    "BestModelCheckpoint monitor "
+                                    f"'{best_cb.monitor}' is not among the "
+                                    f"evaluation metrics {sorted(agg)}; no "
+                                    "best checkpoint will be tracked.",
+                                    stacklevel=2,
+                                )
+                        elif best_cb.is_improvement(float(monitored), best_value):
+                            best_value = float(monitored)
+                            best_path = ckpt.save(
+                                best_mngr,
+                                host_step,
+                                state,
+                                custom_metadata={
+                                    "step": int(host_step),
+                                    "monitor": best_cb.monitor,
+                                    "best_value": best_value,
+                                    "optimizer_fingerprint": optimizer_fingerprint,
+                                },
+                            )
+                            if best_path is not None:
+                                _dispatch_checkpoint_end(host_step, best_path)
+
+                completed_steps += 1
 
             if pending_train is not None:
                 prev_step, prev_logs = pending_train
                 _flush_pending_train(prev_step, prev_logs)
-            pending_train = (host_step, logs)
+                pending_train = None
 
-            if val_loader is not None and should_run_eval(host_step):
-                if all(
-                    hasattr(task, n)
-                    for n in ("init_eval_state", "update_eval_state", "finalize_eval")
-                ):
-                    eval_state = task.init_eval_state()
-                    for vb_np in val_loader.iter_eval_batches():
-                        vb = _to_jax_batch(vb_np)
-                        pred, vb = eval_predict(state, vb)
-                        eval_state = task.update_eval_state(eval_state, pred, vb)
-                    agg = logs_device_to_python(
-                        jax.device_get(task.finalize_eval(eval_state))
-                    )
-                else:
-                    sums: dict[str, float] = {}
-                    denom = 0.0
-                    for vb_np in val_loader.iter_eval_batches():
-                        vb = _to_jax_batch(vb_np)
-                        pred, vb = eval_predict(state, vb)
-                        loss, metrics = task.loss_and_metrics(pred, vb)
-                        logs_eval = {"loss": loss, **metrics}
-                        w = float(np.asarray(vb_np["valid_mask"]).sum())
-                        denom += w
-                        h = logs_device_to_python(logs_eval)
-                        for k, v in h.items():
-                            sums[k] = sums.get(k, 0.0) + float(v) * w
-                    agg = {k: v / max(denom, 1e-12) for k, v in sums.items()}
-                for c in cb:
-                    c.on_eval_end(host_step, agg)
+            for c in cb:
+                c.on_epoch_end(epoch, {})
 
-            completed_steps += 1
-
-        if pending_train is not None:
-            prev_step, prev_logs = pending_train
-            _flush_pending_train(prev_step, prev_logs)
-            pending_train = None
-
+        final_step = int(jax.device_get(state.step))
         for c in cb:
-            c.on_epoch_end(epoch, {})
+            c.on_train_end({"step": final_step})
 
-    final_step = int(jax.device_get(state.step))
-    for c in cb:
-        c.on_train_end({"step": final_step})
-
-    if mngr is not None:
-        for c in model_checkpoint_callbacks:
-            if c.save_on_train_end:
-                path = ckpt.save(
-                    mngr, final_step, state, custom_metadata={"step": int(final_step)}
-                )
-                if path is not None:
-                    c.on_checkpoint_end(final_step, path)
-        mngr.wait_until_finished()
-        mngr.close()
+        if mngr is not None:
+            for c in model_checkpoint_callbacks:
+                if c.save_on_train_end:
+                    path = ckpt.save(
+                        mngr,
+                        final_step,
+                        state,
+                        custom_metadata={
+                            "step": int(final_step),
+                            "optimizer_fingerprint": optimizer_fingerprint,
+                        },
+                    )
+                    if path is not None:
+                        _dispatch_checkpoint_end(final_step, path)
+    finally:
+        # Runs on success and on exceptions: in-flight async saves are
+        # awaited and the managers are released either way.
+        if mngr is not None:
+            mngr.wait_until_finished()
+            mngr.close()
+        if best_mngr is not None:
+            best_mngr.wait_until_finished()
+            best_mngr.close()
 
     return FitResult(history=history, state=state)

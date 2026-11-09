@@ -88,7 +88,6 @@ def main() -> None:
         training=replace(
             base_cfg.training,
             checkpoint_interval_steps=0,
-            max_saved_checkpoints=0,
         )
     )
     save_config(base_cfg, output_root / BASE_CONFIG_FILENAME)

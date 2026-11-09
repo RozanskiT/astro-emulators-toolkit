@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, cast
 
@@ -9,9 +10,13 @@ from flax import nnx
 
 from ._typing import PytreeDict
 from .bundle.artifact import load_bundle_artifact, save_bundle_artifact
+from .bundle.loaded_state import (
+    validate_bundle_weights_payload,
+    validate_loaded_runtime_trees_match_initialization,
+    validate_runtime_contract_metadata,
+)
 from .bundle.hub import get_cache_dir, snapshot_download
 from .bundle.metadata import get_bundle_model_init
-from .bundle.versions import WEIGHTS_LAYOUT
 from .config.schema import RootConfig, canonicalize_config_names
 from .emulator_runtime import (
     apply_jax_runtime,
@@ -29,7 +34,11 @@ from .resolver import (
     validate_model_io_compatibility,
 )
 from .io_trees import get_leaf_by_path, iter_leaf_paths, set_leaf_by_path
-from .spec import materialize_effective_spec
+from .spec import (
+    describe_spec_metadata_presence,
+    domain_leaf_lines,
+    materialize_effective_spec,
+)
 from .data.protocols import (
     DeviceBatchTransformLike,
     init_batch_via_device_transform,
@@ -38,6 +47,17 @@ from .training.callbacks import History
 
 if TYPE_CHECKING:
     import optax
+
+
+# Third-party packages whose absence legitimately means "training extras are
+# not installed"; any other ImportError is a real bug and must propagate.
+_TRAINING_DEPENDENCY_ROOTS = frozenset({"optax", "orbax", "flax", "jax"})
+
+
+def _reraise_unless_missing_training_dependency(exc: ImportError) -> None:
+    root = (getattr(exc, "name", None) or "").split(".")[0]
+    if root not in _TRAINING_DEPENDENCY_ROOTS:
+        raise exc
 
 
 def resolve_solver(*args, **kwargs):
@@ -50,142 +70,6 @@ def make_tx(cfg, **kwargs):
     from .optimizers import make_tx as _make_tx_impl
 
     return _make_tx_impl(cfg, **kwargs)
-
-
-def _validate_bundle_weights_payload(
-    metadata: dict[str, Any], params_pure: dict[str, Any]
-) -> None:
-    layout = metadata.get("weights_layout")
-    if layout != WEIGHTS_LAYOUT:
-        raise ValueError(f"Unsupported bundle weights_layout '{layout}'.")
-    required_keys = ("params", "model_state")
-    missing = [key for key in required_keys if key not in params_pure]
-    if missing:
-        raise ValueError(
-            f"weights_layout '{layout}' is missing required weights keys: {missing}."
-        )
-
-
-def _display_tree_path(path: str) -> str:
-    return path or "<root>"
-
-
-def _normalize_tree_keys_for_bundle_validation(
-    tree: Any, *, tree_name: str, path: str = ""
-) -> Any:
-    if not isinstance(tree, dict):
-        return tree
-    normalized: dict[str, Any] = {}
-    for raw_key, value in tree.items():
-        key = str(raw_key)
-        if not key:
-            raise ValueError(
-                f"{tree_name} contains an empty key at '{_display_tree_path(path)}'."
-            )
-        if "/" in key:
-            raise ValueError(
-                f"{tree_name} contains key {raw_key!r} with '/' at '{_display_tree_path(path)}'."
-            )
-        if key in normalized:
-            raise ValueError(
-                f"{tree_name} key collision after string normalization at '{_display_tree_path(path)}': {raw_key!r}."
-            )
-        next_path = f"{path}/{key}" if path else key
-        normalized[key] = _normalize_tree_keys_for_bundle_validation(
-            value, tree_name=tree_name, path=next_path
-        )
-    return normalized
-
-
-def _validate_loaded_tree_matches_initialized(
-    *,
-    initialized_tree: Any,
-    loaded_tree: Any,
-    tree_name: str,
-    path: str = "",
-) -> None:
-    if isinstance(initialized_tree, dict):
-        if not isinstance(loaded_tree, dict):
-            raise ValueError(
-                f"Loaded {tree_name} tree has a leaf at '{_display_tree_path(path)}' "
-                f"where the initialized {tree_name} tree has a subtree."
-            )
-        initialized_keys = set(initialized_tree)
-        loaded_keys = set(loaded_tree)
-        if initialized_keys != loaded_keys:
-            missing = sorted(initialized_keys - loaded_keys)
-            extra = sorted(loaded_keys - initialized_keys)
-            detail: list[str] = []
-            if missing:
-                detail.append(f"missing keys={missing}")
-            if extra:
-                detail.append(f"extra keys={extra}")
-            raise ValueError(
-                f"Loaded {tree_name} tree structure mismatch at '{_display_tree_path(path)}': {', '.join(detail)}."
-            )
-        for key in sorted(initialized_keys):
-            next_path = f"{path}/{key}" if path else key
-            _validate_loaded_tree_matches_initialized(
-                initialized_tree=initialized_tree[key],
-                loaded_tree=loaded_tree[key],
-                tree_name=tree_name,
-                path=next_path,
-            )
-        return
-    if isinstance(loaded_tree, dict):
-        raise ValueError(
-            f"Loaded {tree_name} tree has a subtree at '{_display_tree_path(path)}' "
-            f"where the initialized {tree_name} tree has a leaf."
-        )
-
-    initialized_arr = np.asarray(initialized_tree)
-    loaded_arr = np.asarray(loaded_tree)
-    initialized_shape = tuple(int(dim) for dim in initialized_arr.shape)
-    loaded_shape = tuple(int(dim) for dim in loaded_arr.shape)
-    if initialized_shape != loaded_shape:
-        raise ValueError(
-            f"Loaded {tree_name} leaf '{_display_tree_path(path)}' has shape "
-            f"{loaded_shape}, expected {initialized_shape}."
-        )
-    initialized_dtype = np.dtype(initialized_arr.dtype)
-    loaded_dtype = np.dtype(loaded_arr.dtype)
-    if initialized_dtype != loaded_dtype:
-        raise ValueError(
-            f"Loaded {tree_name} leaf '{_display_tree_path(path)}' has dtype "
-            f"{loaded_dtype}, expected {initialized_dtype}."
-        )
-
-
-def _validate_loaded_runtime_trees_match_initialization(
-    *,
-    initialized_params: PytreeDict,
-    loaded_params: PytreeDict,
-    initialized_model_state: PytreeDict,
-    loaded_model_state: PytreeDict,
-) -> None:
-    normalized_initialized_params = _normalize_tree_keys_for_bundle_validation(
-        initialized_params, tree_name="initialized parameter tree"
-    )
-    normalized_loaded_params = _normalize_tree_keys_for_bundle_validation(
-        loaded_params, tree_name="loaded parameter tree"
-    )
-    _validate_loaded_tree_matches_initialized(
-        initialized_tree=normalized_initialized_params,
-        loaded_tree=normalized_loaded_params,
-        tree_name="parameter",
-    )
-
-    normalized_initialized_model_state = _normalize_tree_keys_for_bundle_validation(
-        initialized_model_state, tree_name="initialized model_state tree"
-    )
-    normalized_loaded_model_state = _normalize_tree_keys_for_bundle_validation(
-        loaded_model_state, tree_name="loaded model_state tree"
-    )
-    _validate_loaded_tree_matches_initialized(
-        initialized_tree=normalized_initialized_model_state,
-        loaded_tree=normalized_loaded_model_state,
-        tree_name="model_state",
-    )
 
 
 def _extract_init_example(init_example: dict[str, Any]) -> tuple[Any, Any | None]:
@@ -219,150 +103,9 @@ def _expand_scalar_target_leaf_for_init(outputs: Any) -> Any:
     return outputs
 
 
-def _validate_runtime_contract_metadata(
-    metadata: dict[str, Any], *, cfg: RootConfig, model_init: dict[str, Any]
-) -> None:
-    runtime_contract = metadata.get("runtime_contract")
-    if runtime_contract is None:
-        return
-    if not isinstance(runtime_contract, dict):
-        raise ValueError(
-            "Bundle metadata field 'runtime_contract' must be a dictionary when present."
-        )
-    new_required_keys = ("surface", "role_paths", "affine_leaf_specs")
-    missing_new = [key for key in new_required_keys if key not in runtime_contract]
-    if missing_new:
-        raise ValueError(
-            f"Bundle metadata field 'runtime_contract' is missing required keys: {missing_new}."
-        )
-    if not isinstance(runtime_contract.get("role_paths"), dict):
-        raise ValueError(
-            "Bundle metadata field 'runtime_contract.role_paths' must be a dictionary."
-        )
-    if "affine_leaf_specs" in runtime_contract and not isinstance(
-        runtime_contract.get("affine_leaf_specs"), dict
-    ):
-        raise ValueError(
-            "Bundle metadata field 'runtime_contract.affine_leaf_specs' must be a dictionary."
-        )
-
-    entry = get_model_entry_from_name(cfg.model.name)
-    if entry is None or entry.runtime is None:
-        return
-    expected = entry.runtime.describe_runtime(
-        cfg=cfg, spec=metadata["spec"], model_init=model_init
-    )
-    if runtime_contract != expected:
-        raise ValueError(
-            "Bundle metadata runtime_contract does not match the resolved model family runtime contract."
-        )
-
-
 def _spec_block(spec: dict[str, Any], field_name: str) -> dict[str, Any] | None:
     block = spec.get(field_name)
     return block if isinstance(block, dict) else None
-
-
-def _describe_spec_metadata_presence(section: dict[str, Any] | None) -> str:
-    if section is None:
-        return "none"
-
-    present: list[str] = []
-    if isinstance(section.get("channel_names_tree"), dict):
-        present.append("names")
-    if any(
-        isinstance(section.get(field_name), dict)
-        for field_name in ("leaf_units_tree", "channel_units_tree")
-    ):
-        present.append("units")
-    if any(
-        isinstance(section.get(field_name), dict)
-        for field_name in ("leaf_meanings_tree", "channel_meanings_tree")
-    ):
-        present.append("meanings")
-    return ", ".join(present) if present else "none"
-
-
-def _metadata_leaf(
-    section: dict[str, Any] | None,
-    metadata_tree_name: str,
-    path: str,
-) -> Any:
-    if section is None:
-        return None
-    metadata_tree = section.get(metadata_tree_name)
-    if not isinstance(metadata_tree, dict):
-        return None
-    try:
-        return get_leaf_by_path(metadata_tree, path)
-    except KeyError:
-        return None
-
-
-def _format_domain_number(value: Any) -> str:
-    arr = np.asarray(value)
-    if arr.size != 1:
-        return str(value)
-    scalar = float(arr.reshape(-1)[0])
-    return f"{scalar:g}"
-
-
-def _format_domain_interval(min_value: Any, max_value: Any) -> str:
-    return f"[{_format_domain_number(min_value)}, {_format_domain_number(max_value)}]"
-
-
-def _format_domain_unit(unit: Any) -> str:
-    if unit is None:
-        return ""
-    return f" {unit}"
-
-
-def _domain_channel_units(
-    input_spec: dict[str, Any] | None,
-    path: str,
-    index: int,
-) -> str:
-    channel_units = _metadata_leaf(input_spec, "channel_units_tree", path)
-    if isinstance(channel_units, (list, tuple)) and index < len(channel_units):
-        return _format_domain_unit(channel_units[index])
-    return _format_domain_unit(_metadata_leaf(input_spec, "leaf_units_tree", path))
-
-
-def _domain_leaf_lines(
-    path: str,
-    min_value: Any,
-    max_value: Any,
-    *,
-    input_spec: dict[str, Any] | None,
-) -> list[str]:
-    channel_names = _metadata_leaf(input_spec, "channel_names_tree", path)
-    min_arr = np.asarray(min_value)
-    max_arr = np.asarray(max_value)
-    if (
-        isinstance(channel_names, (list, tuple))
-        and min_arr.shape == max_arr.shape
-        and min_arr.ndim >= 1
-        and min_arr.shape[-1] == len(channel_names)
-    ):
-        min_channels = min_arr.reshape(-1, min_arr.shape[-1])[0]
-        max_channels = max_arr.reshape(-1, max_arr.shape[-1])[0]
-        lines = [f"  {path}:"]
-        for idx, name in enumerate(channel_names):
-            interval = _format_domain_interval(min_channels[idx], max_channels[idx])
-            lines.append(
-                f"    {name}: {interval}{_domain_channel_units(input_spec, path, idx)}"
-            )
-        return lines
-
-    unit = _format_domain_unit(_metadata_leaf(input_spec, "leaf_units_tree", path))
-    if min_arr.shape == max_arr.shape and min_arr.ndim == 1 and min_arr.size > 1:
-        lines = [f"  {path}:"]
-        for idx, (min_item, max_item) in enumerate(zip(min_arr, max_arr, strict=True)):
-            lines.append(
-                f"    [{idx}]: {_format_domain_interval(min_item, max_item)}{unit}"
-            )
-        return lines
-    return [f"  {path}: {_format_domain_interval(min_value, max_value)}{unit}"]
 
 
 def _validate_public_batched_input_tree(x: dict[str, Any], *, field_name: str) -> None:
@@ -409,6 +152,8 @@ class Emulator:
 
         self.task: Any | None = None
         self.tx: optax.GradientTransformation | None = None
+        self._optimizer_overridden = False
+        self._cfg_spec_cache: dict[str, Any] | None = None
         self.last_fit_method: str | None = None
         self.last_fit_metadata: dict[str, Any] | None = None
         self.bundle_metadata: dict[str, Any] | None = None
@@ -512,6 +257,7 @@ class Emulator:
         """
         if optimizer is not None:
             self.tx = optimizer
+            self._optimizer_overridden = True
         self.task = (
             task
             if task is not None
@@ -542,6 +288,43 @@ class Emulator:
             seed=self.cfg.seed,
             train_state_cls=TrainState,
         )
+
+    def load_best_checkpoint(self) -> "Emulator":
+        """Restore the best-metric checkpoint written during :meth:`fit`.
+
+        Requires ``training.checkpoint_best_metric`` to have been set (or a
+        ``BestModelCheckpoint`` callback passed) during training, so a best
+        checkpoint exists under ``checkpoints_best/`` in the workdir. The
+        emulator's parameters and model state are replaced with the best
+        snapshot; a typical flow is ``fit(...)``, ``load_best_checkpoint()``,
+        ``save_bundle(...)``.
+        """
+        from .training import checkpoint as ckpt_module
+
+        if self.graphdef is None or self.params is None:
+            raise RuntimeError(
+                "Emulator is not initialized; call fit(...) with best-model "
+                "checkpointing enabled before load_best_checkpoint()."
+            )
+        if self.tx is None:
+            self.tx = make_tx(self.cfg, params=self.params)
+        workdir = Path(self.cfg.training.workdir).resolve()
+        mngr = ckpt_module.create_best_manager(workdir, cfg=self.cfg)
+        try:
+            restored = ckpt_module.restore_latest(mngr, target=self._init_train_state())
+        finally:
+            mngr.wait_until_finished()
+            mngr.close()
+        if restored is None:
+            raise FileNotFoundError(
+                "No best checkpoint found under "
+                f"'{ckpt_module.best_checkpoints_dir(workdir)}'. Enable it with "
+                "training.checkpoint_best_metric (or a BestModelCheckpoint "
+                "callback) and run fit(...) with a validation dataset."
+            )
+        self.params = restored.params
+        self.model_state = restored.model_state
+        return self
 
     def _lazy_initialize_from_dataset(
         self,
@@ -582,13 +365,23 @@ class Emulator:
         The emulator lazily initializes itself from the first training batch when
         necessary. Gradient-based runs use the configured optimizer unless an
         override was attached with :meth:`configure_training`.
+
+        When ``callbacks`` is ``None``, config-declared progress and checkpoint
+        callbacks are built with ``build_callbacks_from_config(cfg)`` so
+        ``training.checkpoint_*`` settings take effect by default. Pass
+        ``callbacks=[]`` to run without callbacks.
         """
         if self.task is None:
             self.task = build_task_from_name(
                 self.cfg.task.name, dict(self.cfg.task.params)
             )
 
-        callbacks = [] if callbacks is None else list(callbacks)
+        if callbacks is None:
+            from .training.callbacks import build_callbacks_from_config
+
+            callbacks = build_callbacks_from_config(self.cfg)
+        else:
+            callbacks = list(callbacks)
 
         model_name = self.cfg.model.name.lower()
         resolved_method = self.cfg.solver.name if method is None else method
@@ -600,6 +393,7 @@ class Emulator:
                 task_params=dict(self.cfg.task.params),
             )
         except ImportError as exc:
+            _reraise_unless_missing_training_dependency(exc)
             raise RuntimeError(
                 "Required training dependencies are unavailable in this environment. "
                 "Reinstall `astro-emulators-toolkit` or verify that its core training packages import correctly."
@@ -615,10 +409,34 @@ class Emulator:
             try:
                 self.tx = make_tx(self.cfg, params=self.params)
             except ImportError as exc:
+                _reraise_unless_missing_training_dependency(exc)
                 raise RuntimeError(
                     "Required training dependencies are unavailable in this environment. "
                     "Reinstall `astro-emulators-toolkit` or verify that its core training packages import correctly."
                 ) from exc
+
+        import dataclasses as _dataclasses
+
+        from .spec import to_json_compatible
+        from .training.paths import append_effective_run_record
+
+        append_effective_run_record(
+            self.cfg.training.workdir,
+            resolved_solver=solver.name,
+            requested_solver=str(resolved_method),
+            optimizer_source=(
+                ("external_override" if self._optimizer_overridden else "config")
+                if solver.name == "gradient"
+                else None
+            ),
+            optim=(
+                to_json_compatible(_dataclasses.asdict(self.cfg.optim))
+                if solver.name == "gradient"
+                else None
+            ),
+            num_steps=self.cfg.training.num_steps,
+            resume=resume,
+        )
 
         result = solver.run(
             cfg=self.cfg,
@@ -636,6 +454,7 @@ class Emulator:
             resume=resume,
             max_steps=max_steps,
             device_batch_transform=device_batch_transform,
+            external_optimizer=self._optimizer_overridden,
         )
 
         self.params = result.params
@@ -738,6 +557,8 @@ class Emulator:
         if self._model_entry is not None and self._model_entry.runtime is not None:
             if not isinstance(x, dict):
                 raise ValueError("Public predict expects canonical dict-tree inputs.")
+            # apply_jax validates again, but with an "apply_jax inputs" error
+            # label; validating here keeps errors attributed to predict.
             _validate_public_batched_input_tree(x, field_name="predict inputs")
         y = self.apply_jax(x, postprocess=True, train=False)
         return to_numpy_pytree(y)
@@ -764,7 +585,7 @@ class Emulator:
                     lines.append(f"  {path}: max_tree missing")
                     continue
                 lines.extend(
-                    _domain_leaf_lines(
+                    domain_leaf_lines(
                         path,
                         min_value,
                         max_value,
@@ -798,7 +619,9 @@ class Emulator:
             ):
                 release_label = f"{release_label} ({release_status})"
         lines = [
-            "Loaded emulator bundle",
+            "Loaded emulator bundle"
+            if self.bundle_metadata is not None
+            else "Emulator (no bundle loaded)",
             f"model={self.cfg.model.name}",
             f"bundle_format_version={metadata.get('bundle_format_version', 'unknown')}",
             f"bundle_id={metadata.get('bundle_id', 'unknown')}",
@@ -817,13 +640,14 @@ class Emulator:
             f"role_paths={runtime_contract.get('role_paths', {})}",
             f"reference_scaling_inputs={'present' if spec.get('reference_scaling_inputs') is not None else 'absent'}",
             f"reference_scaling_outputs={'present' if spec.get('reference_scaling_outputs') is not None else 'absent'}",
-            f"input_metadata={_describe_spec_metadata_presence(self.input_spec)}",
-            f"output_metadata={_describe_spec_metadata_presence(self.output_spec)}",
+            f"input_metadata={describe_spec_metadata_presence(self.input_spec)}",
+            f"output_metadata={describe_spec_metadata_presence(self.output_spec)}",
             self.describe_domain(),
             f"provenance.toolkit_version={provenance.get('toolkit_version', 'unknown')}",
             f"provenance.python_version={provenance.get('python_version', 'unknown')}",
             f"provenance.created_at={provenance.get('created_at', 'unknown')}",
-            f"provenance.git_commit={provenance.get('git_commit', 'unknown')}",
+            "provenance.working_tree_git_commit="
+            f"{provenance.get('working_tree_git_commit', 'unknown')}",
         ]
         return "\n".join(lines)
 
@@ -831,7 +655,11 @@ class Emulator:
     def spec(self) -> dict[str, Any]:
         """Resolved portability spec for the current emulator or loaded bundle."""
         if self.bundle_metadata is None:
-            return materialize_effective_spec(self.cfg)
+            # cfg is immutable after __init__, so the materialized spec is
+            # cached; a copy is returned so callers cannot mutate the cache.
+            if self._cfg_spec_cache is None:
+                self._cfg_spec_cache = materialize_effective_spec(self.cfg)
+            return deepcopy(self._cfg_spec_cache)
         if "spec" not in self.bundle_metadata:
             raise ValueError(
                 "Bundle metadata is missing required 'spec' entry. Re-save the bundle with current toolkit version."
@@ -906,6 +734,11 @@ class Emulator:
             dirpath=dirpath,
             spec=spec,
             extras=extras,
+            optimizer_source=(
+                "external_override" if self._optimizer_overridden else "config"
+            )
+            if self.last_fit_method == "gradient"
+            else None,
         )
         self.bundle_metadata = metadata
         self.model_family_id = metadata.get("model_family_id", self.model_family_id)
@@ -917,8 +750,8 @@ class Emulator:
         bundle_dir, loaded = load_bundle_artifact(dirpath)
         resolved_cfg = loaded.cfg
         model_init = get_bundle_model_init(loaded.metadata, cfg=resolved_cfg)
-        _validate_bundle_weights_payload(loaded.metadata, loaded.params_pure)
-        _validate_runtime_contract_metadata(
+        validate_bundle_weights_payload(loaded.metadata, loaded.params_pure)
+        validate_runtime_contract_metadata(
             loaded.metadata, cfg=resolved_cfg, model_init=model_init
         )
 
@@ -940,7 +773,7 @@ class Emulator:
         loaded_model_state = validate_model_state_dict(
             loaded.params_pure.get("model_state", {})
         )
-        _validate_loaded_runtime_trees_match_initialization(
+        validate_loaded_runtime_trees_match_initialization(
             initialized_params=cast(PytreeDict, emu.params),
             loaded_params=cast(PytreeDict, loaded.params_pure["params"]),
             initialized_model_state=cast(PytreeDict, emu.model_state),

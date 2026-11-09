@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from numbers import Integral
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TextIO
+from typing import TYPE_CHECKING, Any, Literal, TextIO, cast
 
 if TYPE_CHECKING:
     from ..config.schema import RootConfig
@@ -41,7 +41,12 @@ class Callback:
         ...
 
     def on_checkpoint_end(self, step: int, path: str):
-        """Called after trainer-managed checkpoint saving completes."""
+        """Called on every callback after a checkpoint save is accepted.
+
+        With asynchronous checkpointing (the default) the write may still be
+        in flight when this fires; the path identifies where the checkpoint
+        will materialize.
+        """
         ...
 
 
@@ -109,6 +114,23 @@ class _SingleCSVLogger(Callback):
 
     def on_train_begin(self, logs=None):
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        resuming = bool((logs or {}).get("resume")) and (
+            int((logs or {}).get("start_step") or 0) > 0
+        )
+        if resuming and self.path.exists() and self.path.stat().st_size > 0:
+            # Continue the earlier segment's file instead of truncating it.
+            with self.path.open("r", newline="") as existing:
+                header_line = existing.readline().strip()
+            self._file = self.path.open("a", newline="")
+            if header_line:
+                self._writer = csv.DictWriter(
+                    self._file,
+                    fieldnames=header_line.split(","),
+                    extrasaction="ignore",
+                )
+            else:
+                self._writer = None
+            return
         self._file = self.path.open("w", newline="")
         self._writer = None
 
@@ -232,11 +254,9 @@ class ProgressBarLogger(Callback):
             every_n_steps, field_name="ProgressBarLogger every_n_steps"
         )
         self._t0: float | None = None
-        self._last_print = 0
 
     def on_train_begin(self, logs=None):
         self._t0 = time.time()
-        self._last_print = 0
 
     def on_train_batch_end(self, step: int, logs: dict[str, Any]):
         if self.every_n_steps is not None and step % self.every_n_steps != 0:
@@ -252,7 +272,6 @@ class ProgressBarLogger(Callback):
             msg += f"  loss={float(loss):.5g}"
         msg += f"  t={dt:.1f}s"
         print(msg, end="", flush=True)
-        self._last_print = step
 
     def on_eval_end(self, step: int, logs: dict[str, Any]):
         if self.every_n_steps is not None and step % self.every_n_steps != 0:
@@ -338,6 +357,34 @@ class ModelCheckpoint(Callback):
         return False
 
 
+class BestModelCheckpoint(Callback):
+    """Track a validation metric and keep the single best checkpoint.
+
+    The best ``TrainState`` is written to ``checkpoints_best/`` in the
+    workdir, separate from the resume checkpoints, whenever ``monitor``
+    improves at an evaluation step. Restore it after training with
+    ``Emulator.load_best_checkpoint()``.
+    """
+
+    def __init__(self, monitor: str = "loss", mode: Literal["min", "max"] = "min"):
+        monitor = str(monitor).strip()
+        # History keys are "validation_"-prefixed; eval metrics are bare.
+        # Accept either spelling.
+        monitor = monitor.removeprefix("validation_")
+        if not monitor:
+            raise ValueError("BestModelCheckpoint monitor must be a non-empty string.")
+        if mode not in {"min", "max"}:
+            raise ValueError("BestModelCheckpoint mode must be 'min' or 'max'.")
+        self.monitor = monitor
+        self.mode = mode
+
+    def is_improvement(self, value: float, best: float | None) -> bool:
+        """Return True when ``value`` beats the best value seen so far."""
+        if best is None:
+            return True
+        return value < best if self.mode == "min" else value > best
+
+
 def build_callbacks_from_config(cfg: "RootConfig") -> list[Callback]:
     """Build default progress and checkpoint callbacks from a root config."""
     callbacks: list[Callback] = []
@@ -358,6 +405,13 @@ def build_callbacks_from_config(cfg: "RootConfig") -> list[Callback]:
             ModelCheckpoint(
                 every_n_steps=cfg.training.checkpoint_interval_steps,
                 explicit_steps=cfg.training.checkpoint_steps,
+            )
+        )
+    if cfg.training.checkpoint_best_metric is not None:
+        callbacks.append(
+            BestModelCheckpoint(
+                monitor=cfg.training.checkpoint_best_metric,
+                mode=cast('Literal["min", "max"]', cfg.training.checkpoint_best_mode),
             )
         )
     return callbacks

@@ -6,12 +6,22 @@ from astro_emulators_toolkit import RootConfig
 from astro_emulators_toolkit.config.schema import IOSpec, IOTreeSpec
 
 
-def test_top_level_package_import_remains_lightweight():
+def test_top_level_package_exposes_core_config_api():
+    # Note: `import astro_emulators_toolkit` is NOT lightweight — the
+    # top-level normalize_tree/denormalize_tree exports pull in JAX. Only the
+    # Emulator/flax import is deferred via module __getattr__.
     import astro_emulators_toolkit as aet
 
     assert hasattr(aet, "RootConfig")
     assert hasattr(aet, "load_config")
     assert hasattr(aet, "save_config")
+
+
+def test_top_level_all_exports_are_resolvable():
+    import astro_emulators_toolkit as aet
+
+    for name in aet.__all__:
+        assert getattr(aet, name) is not None, name
 
 
 def test_training_callback_import_path_is_public():

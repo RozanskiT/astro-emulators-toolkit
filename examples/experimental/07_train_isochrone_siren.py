@@ -98,7 +98,6 @@ def main() -> None:
             workdir=str(RUN_DIR),
             batch_size=BATCH_SIZE,
             num_steps=NUM_STEPS,
-            val_fraction=VAL_FRACTION,
             logging_interval_steps=smoke_value(50, smoke=5),
             evaluation_interval_steps=smoke_value(100, smoke=10),
             checkpoint_interval_steps=0,

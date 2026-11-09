@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Mapping, cast
 
@@ -45,10 +44,13 @@ def _sample_random_wave(
     max_w: float,
     dtype: jnp.dtype,
 ) -> jax.Array:
-    wave = jax.random.uniform(
+    # Queries are intentionally left unsorted: jnp.interp does not require
+    # sorted query points, the model treats query wavelengths independently,
+    # and on CUDA a per-step sort lowers to a CUB custom call that can
+    # invalidate XLA GPU command-buffer capture on long runs.
+    return jax.random.uniform(
         rng, shape=(batch_size, n_wavelength), minval=min_w, maxval=max_w, dtype=dtype
     )
-    return jnp.sort(wave, axis=1)
 
 
 def _require_train_rng(*, rng: jax.Array | None, context_name: str) -> jax.Array:
@@ -124,7 +126,9 @@ def _inject_query_wavelengths(
     _extract_role_leaf(
         x_payload, parameter_role_path, section_name="inputs", field_name="input"
     )
-    out = deepcopy(x_payload)
+    # Rebuild the dict containers without copying (possibly traced) leaf
+    # arrays; set_leaf_by_path below must not mutate the caller's tree.
+    out = jax.tree_util.tree_map(lambda leaf: leaf, x_payload)
     set_leaf_by_path(
         out,
         _relative_role_path(wavelength_role_path, section_name="inputs"),
@@ -163,11 +167,29 @@ def _wrap_target_output(
     return out
 
 
+_EVAL_MODES = ("grid", "passthrough")
+
+
+def _validate_eval_mode(eval_mode: Any, *, context_name: str) -> str:
+    mode = str(eval_mode).lower()
+    if mode not in _EVAL_MODES:
+        raise ValueError(
+            f"{context_name} eval_mode must be one of {_EVAL_MODES}, got {eval_mode!r}."
+        )
+    return mode
+
+
 @dataclass(frozen=True, eq=False)
 class TransformerPayneFluxDeviceBatchTransform:
     wavelength_grid: Any
     n_wavelength: int
     eval_wavelength_grid: Any | None = None
+    # "grid": evaluate every spectrum on the shared eval_wavelength_grid.
+    # "passthrough": eval batches are returned unchanged — the validation
+    # dataset must already carry explicit per-example query wavelengths and
+    # matching targets. This reproduces per-example random-wavelength
+    # validation protocols exactly (parity with precomputed validation sets).
+    eval_mode: str = "grid"
     min_w: float | None = None
     max_w: float | None = None
     allow_extrapolation: bool = False
@@ -179,7 +201,7 @@ class TransformerPayneFluxDeviceBatchTransform:
     _jdtype: jnp.dtype = field(init=False, repr=False)
     _wave_dtype: jnp.dtype = field(init=False, repr=False)
     _source_wave: jax.Array = field(init=False, repr=False)
-    _eval_grid: jax.Array = field(init=False, repr=False)
+    _eval_grid: jax.Array | None = field(init=False, repr=False)
     _min_w: float = field(init=False, repr=False)
     _max_w: float = field(init=False, repr=False)
 
@@ -214,26 +236,35 @@ class TransformerPayneFluxDeviceBatchTransform:
                 "set allow_extrapolation=True to override."
             )
 
+        eval_mode = _validate_eval_mode(
+            self.eval_mode, context_name=type(self).__name__
+        )
+        object.__setattr__(self, "eval_mode", eval_mode)
+
+        eval_grid: jax.Array | None
         if self.eval_wavelength_grid is not None:
             eval_grid = jnp.asarray(self.eval_wavelength_grid, dtype=wave_dtype)
         elif source_wave.shape[0] == n_wavelength:
             eval_grid = source_wave
+        elif eval_mode == "passthrough":
+            eval_grid = None
         else:
             raise ValueError(
                 "Evaluation wavelength grid must be provided when len(wavelength_grid) != n_wavelength."
             )
 
-        if eval_grid.ndim != 1:
-            raise ValueError(
-                f"eval_wavelength_grid must be 1D, got shape={tuple(eval_grid.shape)}"
-            )
-        if eval_grid.shape[0] != n_wavelength:
-            raise ValueError(
-                f"eval_wavelength_grid length must equal n_wavelength={n_wavelength}, got {eval_grid.shape[0]}."
-            )
-        _validate_strictly_increasing(name="eval_wavelength_grid", wave=eval_grid)
-        if float(eval_grid[0]) < min_wv or float(eval_grid[-1]) > max_wv:
-            raise ValueError("eval_wavelength_grid must lie inside [min_w, max_w].")
+        if eval_grid is not None:
+            if eval_grid.ndim != 1:
+                raise ValueError(
+                    f"eval_wavelength_grid must be 1D, got shape={tuple(eval_grid.shape)}"
+                )
+            if eval_grid.shape[0] != n_wavelength:
+                raise ValueError(
+                    f"eval_wavelength_grid length must equal n_wavelength={n_wavelength}, got {eval_grid.shape[0]}."
+                )
+            _validate_strictly_increasing(name="eval_wavelength_grid", wave=eval_grid)
+            if float(eval_grid[0]) < min_wv or float(eval_grid[-1]) > max_wv:
+                raise ValueError("eval_wavelength_grid must lie inside [min_w, max_w].")
 
         object.__setattr__(self, "_jdtype", jdtype)
         object.__setattr__(self, "_wave_dtype", wave_dtype)
@@ -245,6 +276,16 @@ class TransformerPayneFluxDeviceBatchTransform:
     def for_init(self, batch: dict[str, Any]) -> dict[str, Any]:
         return self(batch, train=False, rng=None)
 
+    def _passthrough_eval_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(batch["x"], dict) and self.wavelength_role_path is not None:
+            _extract_role_leaf(
+                batch["x"],
+                self.wavelength_role_path,
+                section_name="inputs",
+                field_name="input",
+            )
+        return dict(batch)
+
     def __call__(
         self,
         batch: dict[str, Any],
@@ -252,6 +293,8 @@ class TransformerPayneFluxDeviceBatchTransform:
         rng: jax.Array | None = None,
         train: bool,
     ) -> dict[str, Any]:
+        if not train and self.eval_mode == "passthrough":
+            return self._passthrough_eval_batch(batch)
         out = dict(batch)
         source_y = _extract_target_array(
             batch["y"], output_role_path=self.output_role_path
@@ -267,6 +310,7 @@ class TransformerPayneFluxDeviceBatchTransform:
                 dtype=self._wave_dtype,
             )
         else:
+            assert self._eval_grid is not None
             query_wave = jnp.broadcast_to(
                 self._eval_grid[None, :], (batch_size, self.n_wavelength)
             )
@@ -293,7 +337,11 @@ class TransformerPayneFluxDeviceBatchTransform:
 class TransformerPayneIntensityDeviceBatchTransform:
     common_waves: Mapping[str, Any]
     n_wavelength: int
-    eval_wavelength_grid: Any
+    eval_wavelength_grid: Any | None = None
+    # See TransformerPayneFluxDeviceBatchTransform.eval_mode. In
+    # "passthrough" mode eval batches must already carry explicit query
+    # wavelengths and stacked per-channel targets.
+    eval_mode: str = "grid"
     output_order: tuple[str, ...] = ("lines", "continuum")
     channels: int | None = None
     expected_output_names: tuple[str, ...] | None = None
@@ -310,7 +358,7 @@ class TransformerPayneIntensityDeviceBatchTransform:
     _jdtype: jnp.dtype = field(init=False, repr=False)
     _wave_dtype: jnp.dtype = field(init=False, repr=False)
     _source_waves: dict[str, jax.Array] = field(init=False, repr=False)
-    _eval_grid: jax.Array = field(init=False, repr=False)
+    _eval_grid: jax.Array | None = field(init=False, repr=False)
     _min_w: float = field(init=False, repr=False)
     _max_w: float = field(init=False, repr=False)
 
@@ -379,16 +427,29 @@ class TransformerPayneIntensityDeviceBatchTransform:
                     f"Expected {tuple(self.expected_channel_dataset_keys)}, got {tuple(output_order)}."
                 )
 
-        eval_grid = jnp.asarray(self.eval_wavelength_grid, dtype=wave_dtype)
-        if eval_grid.ndim != 1:
-            raise ValueError(
-                f"eval_wavelength_grid must be 1D, got shape={tuple(eval_grid.shape)}"
-            )
-        if eval_grid.shape[0] != n_wavelength:
-            raise ValueError(
-                f"eval_wavelength_grid length must equal n_wavelength={n_wavelength}, got {eval_grid.shape[0]}."
-            )
-        _validate_strictly_increasing(name="eval_wavelength_grid", wave=eval_grid)
+        eval_mode = _validate_eval_mode(
+            self.eval_mode, context_name=type(self).__name__
+        )
+        object.__setattr__(self, "eval_mode", eval_mode)
+
+        eval_grid: jax.Array | None
+        if self.eval_wavelength_grid is None:
+            if eval_mode != "passthrough":
+                raise ValueError(
+                    "eval_wavelength_grid is required unless eval_mode='passthrough'."
+                )
+            eval_grid = None
+        else:
+            eval_grid = jnp.asarray(self.eval_wavelength_grid, dtype=wave_dtype)
+            if eval_grid.ndim != 1:
+                raise ValueError(
+                    f"eval_wavelength_grid must be 1D, got shape={tuple(eval_grid.shape)}"
+                )
+            if eval_grid.shape[0] != n_wavelength:
+                raise ValueError(
+                    f"eval_wavelength_grid length must equal n_wavelength={n_wavelength}, got {eval_grid.shape[0]}."
+                )
+            _validate_strictly_increasing(name="eval_wavelength_grid", wave=eval_grid)
 
         overlap_min = float(max(float(w[0]) for w in source_waves.values()))
         overlap_max = float(min(float(w[-1]) for w in source_waves.values()))
@@ -409,8 +470,12 @@ class TransformerPayneIntensityDeviceBatchTransform:
                 "set allow_extrapolation=True to override."
             )
 
-        if not self.allow_eval_outside_overlap and (
-            float(eval_grid[0]) < overlap_min or float(eval_grid[-1]) > overlap_max
+        if (
+            eval_grid is not None
+            and not self.allow_eval_outside_overlap
+            and (
+                float(eval_grid[0]) < overlap_min or float(eval_grid[-1]) > overlap_max
+            )
         ):
             raise ValueError(
                 "eval_wavelength_grid must lie inside the channel overlap interval by default; "
@@ -454,6 +519,15 @@ class TransformerPayneIntensityDeviceBatchTransform:
         rng: jax.Array | None = None,
         train: bool,
     ) -> dict[str, Any]:
+        if not train and self.eval_mode == "passthrough":
+            if isinstance(batch["x"], dict) and self.wavelength_role_path is not None:
+                _extract_role_leaf(
+                    batch["x"],
+                    self.wavelength_role_path,
+                    section_name="inputs",
+                    field_name="input",
+                )
+            return dict(batch)
         out = dict(batch)
         channel_arrays = self._extract_channel_arrays(batch["y"])
         batch_size = int(next(iter(channel_arrays.values())).shape[0])
@@ -467,6 +541,7 @@ class TransformerPayneIntensityDeviceBatchTransform:
                 dtype=self._wave_dtype,
             )
         else:
+            assert self._eval_grid is not None
             query_wave = jnp.broadcast_to(
                 self._eval_grid[None, :], (batch_size, self.n_wavelength)
             )
@@ -503,6 +578,7 @@ def make_flux_batch_transform(
     wavelength_grid: np.ndarray,
     n_wavelength: int,
     eval_wavelength_grid: np.ndarray | None = None,
+    eval_mode: str = "grid",
     min_w: float | None = None,
     max_w: float | None = None,
     allow_extrapolation: bool = False,
@@ -516,6 +592,7 @@ def make_flux_batch_transform(
         wavelength_grid=wavelength_grid,
         n_wavelength=n_wavelength,
         eval_wavelength_grid=eval_wavelength_grid,
+        eval_mode=eval_mode,
         min_w=min_w,
         max_w=max_w,
         allow_extrapolation=allow_extrapolation,
@@ -531,7 +608,8 @@ def make_intensity_batch_transform(
     *,
     common_waves: Mapping[str, np.ndarray],
     n_wavelength: int,
-    eval_wavelength_grid: np.ndarray,
+    eval_wavelength_grid: np.ndarray | None = None,
+    eval_mode: str = "grid",
     output_order: tuple[str, ...] = ("lines", "continuum"),
     channels: int | None = None,
     expected_output_names: tuple[str, ...] | None = None,
@@ -550,6 +628,7 @@ def make_intensity_batch_transform(
         common_waves=common_waves,
         n_wavelength=n_wavelength,
         eval_wavelength_grid=eval_wavelength_grid,
+        eval_mode=eval_mode,
         output_order=output_order,
         channels=channels,
         expected_output_names=expected_output_names,

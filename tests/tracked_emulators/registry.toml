@@ -1,0 +1,64 @@
+# Pretrained emulators that every toolkit change must keep working: each one
+# must still load, verify its published fingerprint, and predict what it
+# predicted under the toolkit version that wrote it. See README.md here.
+#
+# Pin `revision` to a commit (a tag or branch can move). `label` names the
+# reference file. `written_by_toolkit` is the bundle's provenance
+# toolkit_version, and is the version to record its reference with.
+# Optional per entry: rtol, atol, n_points, n_axis, allow_legacy_warning, notes.
+
+[[emulator]]
+repo_id = "mjablonska/TPayne-spice-harps-interp"
+label = "v1.2.0"
+revision = "b19c22fbc8b8d1ae29157fa77790bc94a03c424d"
+owner = "Maja Jablonska"
+used_by = "SPICE (IntensityPretrainedAemuSpectrumEmulator); default revision (main)"
+written_by_toolkit = "0.2.0.dev0"
+
+[[emulator]]
+repo_id = "mjablonska/TPayne-spice-harps-interp"
+label = "v1.1.0"
+revision = "05d69555fd20e84a8be98c46e6a45e90d1e368a2"
+owner = "Maja Jablonska"
+used_by = "SPICE, when pinned to the Balmer-wing fine-tune"
+written_by_toolkit = "0.2.0.dev0"
+
+[[emulator]]
+repo_id = "mjablonska/TPayne-spice-harps-interp"
+label = "v1.0.0"
+revision = "2b0a93b582a9e20058db2b4b68df88a205deb4aa"
+owner = "Maja Jablonska"
+used_by = "SPICE, when pinned to the pre-fine-tune model"
+written_by_toolkit = "0.2.0.dev0"
+
+[[emulator]]
+repo_id = "RozanskiT/TPayne-spice-harps"
+label = "main-3df764e"
+revision = "3df764e62655d8b4ca6aa3565072166cf145830c"
+owner = "Tomasz Rozanski"
+used_by = "SPICE"
+written_by_toolkit = "0.2.0.dev0"
+
+[[emulator]]
+repo_id = "RozanskiT/TPayne-spice-small-random"
+label = "main-b6c7884"
+revision = "b6c7884c66638088b864d750035bb63635078c2a"
+owner = "Tomasz Rozanski"
+used_by = "small TransformerPayne test bundle"
+written_by_toolkit = "0.1.0"
+
+[[emulator]]
+repo_id = "RozanskiT/example_bundle"
+label = "main-7e5ee14"
+revision = "7e5ee14124ef46f331d623c3f8bd5db0ad18e82b"
+owner = "Tomasz Rozanski"
+used_by = "README quickstart (Emulator.from_pretrained)"
+written_by_toolkit = "0.1.0"
+
+[[emulator]]
+repo_id = "RozanskiT/isochrones-mlp"
+label = "main-9f104bf"
+revision = "9f104bf15f2ffc8144ccf06b49015f1ed1ad09f9"
+owner = "Tomasz Rozanski"
+used_by = "isochrone MLP"
+written_by_toolkit = "0.1.0"

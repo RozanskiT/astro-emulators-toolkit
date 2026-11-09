@@ -17,7 +17,6 @@ os.environ.setdefault("JAX_ENABLE_X64", "1")
 from astro_emulators_toolkit import Emulator
 from astro_emulators_toolkit.data import TreeArrayDataset
 from astro_emulators_toolkit.presets import transformer_payne_flux
-from astro_emulators_toolkit.training import build_callbacks_from_config
 
 import sys
 
@@ -30,13 +29,13 @@ def main() -> None:
         val_fraction=0.1, seed=2
     )
 
+    profile = "smoke"
     cfg = transformer_payne_flux(
         workdir=str(Path("examples/runs/basic_transformer_payne_flux")),
-        profile="smoke",
+        profile=profile,
     )
 
     emu = Emulator.from_config(cfg)
-    callbacks = build_callbacks_from_config(cfg)
     transform = emu.make_device_batch_transform(
         wavelength_grid=wave, n_wavelength=wave.shape[0]
     )
@@ -44,7 +43,6 @@ def main() -> None:
         TreeArrayDataset(x=x_train, y=y_train),
         validation_dataset=TreeArrayDataset(x=x_val, y=y_val),
         device_batch_transform=transform,
-        callbacks=callbacks,
     )
 
     inference_wave = np.broadcast_to(wave[None, :], (2, wave.shape[0]))
@@ -53,7 +51,7 @@ def main() -> None:
     )["flux"]
     bundle_dir = emu.save_bundle()
     print("Steps:", len(history.logs.get("training_loss", [])))
-    print("Preset profile:", "smoke")
+    print("Preset profile:", profile)
     print("Pred shape:", pred.shape)
     print("Saved bundle:", bundle_dir)
 

@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ..config.migrations import migrate_resolved_bundle_config, warn_legacy_config
 from ..resolver import derive_model_family_id
 from ..spec import materialize_effective_spec, to_json_compatible, validate_spec
-from .bundle import Bundle
+from .bundle import Bundle, bundle_toolkit_version
 from .versions import (
     BUNDLE_FORMAT_VERSION,
     CONFIG_SCHEMA_VERSION,
@@ -59,6 +60,7 @@ def save_bundle_artifact(
     dirpath: str | Path | None,
     spec: dict[str, Any] | None,
     extras: dict[str, Any] | None = None,
+    optimizer_source: str | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     if graphdef is None or params is None or model_state is None:
         raise RuntimeError(
@@ -113,6 +115,11 @@ def save_bundle_artifact(
     }
     if last_fit_method is not None:
         metadata["fit_method"] = last_fit_method
+    if optimizer_source is not None:
+        # "config" when the optimizer came from cfg.optim, "external_override"
+        # when configure_training(optimizer=...) supplied it — in which case
+        # the resolved optim block does NOT describe the effective optimizer.
+        metadata["optimizer_source"] = str(optimizer_source)
     if last_fit_metadata is not None:
         metadata["solver_metadata"] = to_json_compatible(dict(last_fit_metadata))
     if extras_payload is not None:
@@ -134,13 +141,54 @@ def save_bundle_artifact(
     return dirpath, metadata
 
 
+def _uniform_float_dtype(tree: Any) -> str | None:
+    """The single floating dtype name of a parameter tree, or None if mixed."""
+    import jax
+    import jax.numpy as jnp
+
+    names = {
+        jnp.dtype(leaf.dtype).name
+        for leaf in jax.tree.leaves(tree)
+        if hasattr(leaf, "dtype") and jnp.issubdtype(leaf.dtype, jnp.floating)
+    }
+    return names.pop() if len(names) == 1 else None
+
+
 def load_bundle_artifact(dirpath: str | Path):
+    from .versions import migrate_bundle_metadata
+
     bundle_dir = Path(dirpath)
     loaded = Bundle.load(bundle_dir)
+    # Upgrade supported older formats in memory before header validation;
+    # never mutates the on-disk bundle. See bundle/versions.py for the policy.
+    loaded.metadata = migrate_bundle_metadata(loaded.metadata)
     validate_bundle_header(loaded.metadata)
     manifest = verify_bundle_integrity(bundle_dir)
     loaded.metadata["bundle_id"] = manifest["bundle_id"]
     validate_fingerprint_evaluation_payload(bundle_dir, loaded.metadata)
+    # The model and solver sections are rebuilt from metadata["resolved"], so
+    # an older config schema must be migrated there too, under the same rules
+    # as config.json (config/migrations.py). Both sets of notes go into one
+    # warning; on-disk files are untouched.
+    notes = list(loaded.config_migration_notes)
+    written_schema_version = int(loaded.metadata["config_schema_version"])
+    resolved = loaded.metadata.get("resolved")
+    if isinstance(resolved, dict):
+        loaded.metadata["resolved"], resolved_notes = migrate_resolved_bundle_config(
+            resolved,
+            schema_version=written_schema_version,
+            toolkit_version=bundle_toolkit_version(loaded.metadata),
+            stored_param_dtype=_uniform_float_dtype(
+                loaded.params_pure.get("params", {})
+            ),
+        )
+        notes.extend(resolved_notes)
+    warn_legacy_config(
+        notes,
+        source=f"Bundle {bundle_dir}",
+        schema_version=written_schema_version,
+        stacklevel=3,
+    )
     loaded.cfg = apply_resolved_bundle_metadata(loaded.cfg, loaded.metadata)
     model_init = get_bundle_model_init(loaded.metadata, cfg=loaded.cfg)
     for block in _REFERENCE_SCALING_BLOCKS:

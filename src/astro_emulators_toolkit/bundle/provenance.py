@@ -14,9 +14,18 @@ from .. import __version__
 
 
 def _safe_git_commit() -> str | None:
-    proc = subprocess.run(
-        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # git may be absent entirely (minimal containers, cluster images);
+        # provenance must never make save_bundle fail.
+        return None
     if proc.returncode != 0:
         return None
     commit = proc.stdout.strip()
@@ -45,7 +54,10 @@ def build_provenance() -> dict[str, Any]:
             "flax": flax.__version__,
             "optax": _optional_dependency_version("optax"),
         },
-        "git_commit": _safe_git_commit(),
+        # HEAD of whatever git repository the *invoking process* runs in — the
+        # user's analysis repo for an installed toolkit — NOT the toolkit's own
+        # commit (that is what toolkit_version identifies).
+        "working_tree_git_commit": _safe_git_commit(),
     }
 
 
