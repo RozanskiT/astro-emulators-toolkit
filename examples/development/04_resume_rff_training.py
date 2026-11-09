@@ -26,7 +26,8 @@ data_cfg = NpyTableConfig(
 )
 
 ds = NpyTableDataset.from_config(data_cfg)
-train_ds, val_ds = ds.train_val_split(cfg.training.val_fraction, seed=cfg.seed)
+# Same split as 02_train_rff_mlp.py, so the resumed run validates on the same rows.
+train_ds, val_ds = ds.train_val_split(val_fraction=0.1, seed=cfg.seed)
 
 emu = Emulator.from_config(cfg).configure_training()
 history = emu.fit(

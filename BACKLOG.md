@@ -7,13 +7,6 @@ many of these lives in `ARCHITECTURE_REVIEW_2026-07.md`.
 
 ## Config / schema
 
-- **Remove `training.val_fraction`.** It is advisory-only today (`fit()`
-  never auto-splits — the split is a scientific decision; use
-  `data.train_val_split`). Removal is deliberately deferred to the first
-  `CONFIG_SCHEMA_VERSION` bump because `load_config` rejects unknown keys:
-  doing it requires a v1→v2 config migration (the machinery exists in
-  `bundle/versions.py`) and regenerating the shipped reference bundle assets
-  (`examples/assets/build_reference_bundle.py`).
 - **Optional `min_lr` floor for the cosine schedule.** The original
   transfer-learning code supported `min_learning_rate`; aemu cosine always
   decays toward zero (reaching it one count past the final applied step).

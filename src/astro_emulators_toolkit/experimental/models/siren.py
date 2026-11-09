@@ -11,6 +11,7 @@ import jax.numpy as jnp
 from flax import nnx
 
 from ...config.parsing import parse_bool
+from ...models.dtypes import parse_dtype_name, resolve_param_dtype
 
 
 def _positive_int(value: Any, *, field_name: str) -> int:
@@ -43,6 +44,7 @@ class SirenConfig:
     omega0_hidden: float = 30.0
     use_bias: bool = True
     dtype: str = "float32"
+    param_dtype: str | None = None  # None means "same as dtype"
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "SirenConfig":
@@ -52,6 +54,7 @@ class SirenConfig:
             "omega0_hidden",
             "use_bias",
             "dtype",
+            "param_dtype",
         }
         unknown = sorted(set(d) - allowed)
         if unknown:
@@ -67,13 +70,9 @@ class SirenConfig:
         if not hidden_sizes:
             raise ValueError("hidden_sizes must contain at least one layer.")
 
-        dtype = str(d.get("dtype", "float32"))
-        try:
-            jnp.dtype(dtype)
-        except TypeError as exc:
-            raise ValueError(
-                f"Siren dtype must be a valid JAX dtype, got {dtype!r}."
-            ) from exc
+        dtype = parse_dtype_name(
+            d.get("dtype", "float32"), field_name="dtype", owner="Siren"
+        )
 
         return cls(
             hidden_sizes=hidden_sizes,
@@ -85,6 +84,7 @@ class SirenConfig:
             ),
             use_bias=parse_bool(d.get("use_bias", True), field_name="use_bias"),
             dtype=dtype,
+            param_dtype=resolve_param_dtype(d, dtype=dtype, owner="Siren"),
         )
 
 
@@ -93,6 +93,7 @@ class Siren(nnx.Module):
 
     def __init__(self, *, in_dim: int, out_dim: int, cfg: SirenConfig, rngs: nnx.Rngs):
         dtype = jnp.dtype(cfg.dtype)
+        param_dtype = jnp.dtype(cfg.param_dtype or cfg.dtype)
         sizes = (int(in_dim),) + tuple(cfg.hidden_sizes) + (int(out_dim),)
         if sizes[0] <= 0 or sizes[-1] <= 0:
             raise ValueError(f"SIREN dimensions must be positive, got {sizes}.")
@@ -112,7 +113,7 @@ class Siren(nnx.Module):
                     rngs=rngs,
                     use_bias=cfg.use_bias,
                     dtype=dtype,
-                    param_dtype=dtype,
+                    param_dtype=param_dtype,
                     kernel_init=_uniform_initializer(float(bound)),
                     bias_init=jax.nn.initializers.zeros,
                 )

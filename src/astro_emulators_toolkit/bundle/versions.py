@@ -11,7 +11,13 @@ Version fields and what they mean
   metadata envelope changes shape.
 - ``config_schema_version`` (int): the ``RootConfig`` schema stored in the
   bundle's ``config.json``. Bump it when previously saved configs stop
-  loading correctly under the current config dataclasses.
+  loading correctly, or would change meaning, under the current config
+  dataclasses. Version 1 was written by toolkit 0.1.x, version 2 by 0.2.0+.
+  Older supported versions are upgraded in memory by the chain in
+  ``config/migrations.py`` (``CONFIG_MIGRATIONS``), which also covers the
+  ``resolved`` metadata block; settings whose value the upgrade changes are
+  reported in one ``LegacyConfigWarning``. Current-version configs are
+  validated strictly.
 - ``spec.spec_version`` (int): the effective I/O spec structure carried in
   metadata (structure trees, scaling blocks, domain blocks). Bump it when
   the meaning or shape of spec blocks changes.
@@ -46,6 +52,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from ..config.migrations import SUPPORTED_CONFIG_SCHEMA_VERSIONS
 from ..config.schema import CONFIG_SCHEMA_VERSION
 from ..spec import SPEC_VERSION
 
@@ -53,7 +60,6 @@ from ..spec import SPEC_VERSION
 BUNDLE_FORMAT_VERSION = 1
 SUPPORTED_BUNDLE_FORMAT_VERSIONS = frozenset({BUNDLE_FORMAT_VERSION})
 
-SUPPORTED_CONFIG_SCHEMA_VERSIONS = frozenset({CONFIG_SCHEMA_VERSION})
 SUPPORTED_SPEC_VERSIONS = frozenset({SPEC_VERSION})
 
 WEIGHTS_LAYOUT = "params_plus_model_state_v1"

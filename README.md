@@ -722,7 +722,7 @@ cfg = load_config("runs/demo/config.yaml")
 
 ### Stable model families
 
-- `mlp`: general dense regression model. This is the basis for the stable Payne-style flux example and the stable isochrone example.
+- `mlp`: general dense regression model. This is the basis for the stable Payne-style flux example and the stable isochrone example. `model.params.dtype` is the compute dtype and `model.params.param_dtype` the parameter storage dtype (default: same as `dtype`); `dtype="bfloat16"` with `param_dtype="float32"` is the usual mixed-precision setup.
 - `cannon`: closed-form quadratic baseline. Useful as a simple reference model and regression baseline, with an optional intercept term that is left unregularized by default in the closed-form solver.
 - `transformer_payne`: wavelength-explicit spectral/intensity model family with runtime helpers for explicit wavelength handling.
 
@@ -1139,6 +1139,21 @@ works as follows:
 - Older-but-supported bundle formats are upgraded **in memory** at load time
   through the migration registry (`BUNDLE_METADATA_MIGRATIONS`); the on-disk
   bundle is never modified by loading.
+- Older config schemas are upgraded the same way
+  (`src/astro_emulators_toolkit/config/migrations.py`), for bundles and for
+  `load_config(...)`. Config schema v1 was written by toolkit 0.1.x and v2 by
+  0.2.0+. (The 0.2.0 pre-releases, `0.2.0.devN`, still stamped v1 but wrote
+  v2 meaning; bundles record the toolkit version, so they load as v2.) A v1
+  document keeps its v1 meaning: the removed `training.val_fraction` key is
+  dropped, absent keys get the v1
+  defaults (constant learning rate, no warmup), non-float32 MLP-style models
+  keep float32 parameter storage, and settings that 0.1.x accepted but
+  ignored (`scale_embedding_lr` without `lr_scaling`, `decay_steps` with the
+  cosine schedule, `solver.params` for the gradient solver,
+  `lr_scaling="si"`/`"standard"` as aliases for `None`) are replaced by the
+  value that was in effect, listed in one `LegacyConfigWarning`. The same
+  settings in a v2 document are errors. Re-saving a loaded v1 bundle writes
+  a v2 bundle.
 - Every version bump must either extend the supported window with a
   registered migration or be an explicit, CHANGELOG-documented hard break.
   Dropping a version from a supported window is itself a breaking change.

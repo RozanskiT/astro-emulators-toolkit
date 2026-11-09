@@ -16,7 +16,9 @@ from ..io_trees import (
 
 
 SchemaDict = dict[str, Any]
-CONFIG_SCHEMA_VERSION = 1
+# Version history and the in-memory upgrade of older documents live in
+# config/migrations.py.
+CONFIG_SCHEMA_VERSION = 2
 
 
 def _normalize_registry_name(name: str) -> str:
@@ -442,10 +444,9 @@ class TrainConfig:
     batch_size: int = 1024
     # total target optimization steps; resume=True trains until state.step reaches num_steps
     num_steps: int = 1000
-    # Advisory record of the intended validation split. fit() does NOT
-    # split automatically: build a validation set yourself (e.g. with
-    # data.train_val_split) and pass it as validation_dataset.
-    val_fraction: float = 0.1
+    # There is no validation-split setting: fit() never splits. Build the
+    # validation set yourself (e.g. data.train_val_split) and pass it as
+    # validation_dataset.
 
     shuffle: bool = True
     shuffle_seed: int = 0
@@ -506,16 +507,6 @@ class TrainConfig:
                 "training.checkpoint_best_mode must be 'min' or 'max'."
             )
         object.__setattr__(self, "checkpoint_best_mode", mode)
-
-        val_fraction = _normalize_finite_float(
-            self.val_fraction,
-            field_name="training.val_fraction",
-        )
-        if val_fraction < 0.0 or val_fraction > 1.0:
-            raise ValueError(
-                "training.val_fraction must satisfy 0 <= val_fraction <= 1."
-            )
-        object.__setattr__(self, "val_fraction", val_fraction)
 
         shuffle_seed = _normalize_int(
             self.shuffle_seed,

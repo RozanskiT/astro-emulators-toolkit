@@ -126,7 +126,6 @@ def main() -> None:
             workdir=str(RUN_DIR),
             batch_size=256,
             num_steps=1,
-            val_fraction=VAL_FRACTION,
             logging_interval_steps=1,
             evaluation_interval_steps=1,
             checkpoint_interval_steps=0,

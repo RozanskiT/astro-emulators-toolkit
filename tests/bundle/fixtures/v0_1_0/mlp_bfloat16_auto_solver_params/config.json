@@ -1,0 +1,73 @@
+{
+  "bundle": {
+    "bundle_subdir": "bundle"
+  },
+  "hub": {
+    "repo_id": null,
+    "revision": null
+  },
+  "io": {
+    "input_domain": null,
+    "inputs": null,
+    "outputs": null,
+    "reference_scaling_inputs": null,
+    "reference_scaling_outputs": null
+  },
+  "model": {
+    "init_hints": {},
+    "name": "mlp",
+    "params": {
+      "activation": "tanh",
+      "dtype": "bfloat16",
+      "hidden_sizes": [
+        8
+      ]
+    }
+  },
+  "optim": {
+    "b1": 0.9,
+    "b2": 0.999,
+    "decay_steps": 0,
+    "eps": 1e-08,
+    "grad_clip": 0.0,
+    "lr": 0.01,
+    "lr_scaling": null,
+    "name": "adam",
+    "precondition_1d": false,
+    "precondition_frequency": 10,
+    "scale_embedding_lr": 1.0,
+    "schedule": "constant",
+    "warmup_steps": 0,
+    "weight_decay": 0.0
+  },
+  "schema_version": 1,
+  "seed": 0,
+  "solver": {
+    "name": "auto",
+    "params": {
+      "foo": 1
+    }
+  },
+  "task": {
+    "name": "regression",
+    "params": {
+      "loss": "mse"
+    }
+  },
+  "training": {
+    "batch_size": 8,
+    "checkpoint_interval_steps": 500,
+    "checkpoint_steps": null,
+    "evaluation_interval_steps": 1,
+    "evaluation_steps": null,
+    "logging_interval_steps": 50,
+    "logging_steps": null,
+    "max_saved_checkpoints": 5,
+    "num_steps": 5,
+    "shuffle": true,
+    "shuffle_seed": 0,
+    "steps_per_epoch": null,
+    "val_fraction": 0.1,
+    "workdir": "./runs/from_bundle"
+  }
+}

@@ -366,7 +366,6 @@ def test_optim_config_keeps_si_as_first_class_lr_scaling():
     [
         ({"batch_size": 0}, "training.batch_size must be > 0"),
         ({"num_steps": -1}, "training.num_steps must be >= 0"),
-        ({"val_fraction": 1.5}, "training.val_fraction must satisfy"),
         ({"steps_per_epoch": 0}, "training.steps_per_epoch must be > 0 or None"),
     ],
 )

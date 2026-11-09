@@ -36,6 +36,13 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("config", type=Path, help="Path to config.json/config.yaml.")
     parser.add_argument(
+        "--val-fraction",
+        type=float,
+        default=0.1,
+        help="Fraction of the data held out for validation (default: 0.1). The "
+        "split is part of the experiment, not of the RootConfig.",
+    )
+    parser.add_argument(
         "--label",
         default=None,
         help="Optional run label written into the tuning summary.",
@@ -55,7 +62,7 @@ def main() -> None:
     cfg = load_config(args.config)
 
     x_train, y_train, x_val, y_val, _ = split_randomized_flux(
-        val_fraction=float(cfg.training.val_fraction),
+        val_fraction=float(args.val_fraction),
         seed=int(cfg.seed),
     )
 

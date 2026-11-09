@@ -170,7 +170,6 @@ def _build_cfg(*, batch_size: int) -> RootConfig:
             workdir=str(RUN_DIR / "_scratch"),
             batch_size=batch_size,
             num_steps=NUM_STEPS,
-            val_fraction=VAL_FRACTION,
             logging_interval_steps=0,
             evaluation_interval_steps=64,
             checkpoint_interval_steps=0,

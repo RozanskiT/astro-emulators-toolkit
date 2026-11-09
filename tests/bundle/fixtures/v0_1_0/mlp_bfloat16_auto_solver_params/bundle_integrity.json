@@ -1,0 +1,23 @@
+{
+  "algorithm": "sha256",
+  "bundle_id": "sha256:f12e6c7cc79f6a9446b952a7d2f83a71a4168aaf8bd5478c64314b21f27ef45a",
+  "integrity_format_version": 1,
+  "tree": [
+    {
+      "path": "README.txt",
+      "sha256": "50612a33d3c48506832054a7e4e377b28f3f2b83fa1a4a60d45f070b7ec66c6f"
+    },
+    {
+      "path": "config.json",
+      "sha256": "5aae52b5b69581bdfbcde0afe0e84a3ba9117a8c7a27ad6f8aee37be676663ac"
+    },
+    {
+      "path": "metadata.json",
+      "sha256": "dd7e64c91c7da03bf27696100d5484759706b32a06f6d08fb09075e1e2191ed9"
+    },
+    {
+      "path": "weights/weights.safetensors",
+      "sha256": "bba450d6dccf69ccc32eea9f4772595c9266fa7287820a12216d95deaf1b2cd9"
+    }
+  ]
+}

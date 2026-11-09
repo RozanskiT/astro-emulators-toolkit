@@ -9,8 +9,12 @@ from dataclasses import asdict, fields, is_dataclass
 from pathlib import Path, PurePath
 from typing import Any, TypeGuard, Union, cast, get_args, get_origin, get_type_hints
 
+from .migrations import (
+    migrate_config_dict,
+    warn_legacy_config,
+)
 from .parsing import parse_bool
-from .schema import CONFIG_SCHEMA_VERSION, RootConfig, canonicalize_config_names
+from .schema import RootConfig, canonicalize_config_names
 
 
 _YAML_SUFFIXES = {".yaml", ".yml"}
@@ -221,6 +225,29 @@ def save_config(cfg: RootConfig, path: str | Path) -> None:
 
 
 def load_config(path: str | Path) -> RootConfig:
+    """Load a JSON/YAML config.
+
+    Configs declaring an older supported ``schema_version`` are upgraded in
+    memory (see ``config/migrations.py``) with a ``LegacyConfigWarning``
+    listing any setting whose value changed; current-version configs are
+    validated strictly.
+    """
+    cfg, notes, schema_version = load_config_with_migration_notes(path)
+    warn_legacy_config(
+        notes, source=f"Config {Path(path)}", schema_version=schema_version
+    )
+    return cfg
+
+
+def load_config_with_migration_notes(
+    path: str | Path, *, toolkit_version: str | None = None
+) -> tuple[RootConfig, list[str], int]:
+    """Like ``load_config`` but return migration notes instead of warning.
+
+    ``toolkit_version`` (from a bundle's provenance) tells 0.1.x documents
+    from 0.2.0 pre-release ones, which share the v1 stamp; see
+    ``config/migrations.py``. Returns ``(cfg, notes, schema_version_as_written)``.
+    """
     path = Path(path)
     if _is_yaml_path(path):
         yaml = _import_yaml()
@@ -253,17 +280,17 @@ def load_config(path: str | Path) -> RootConfig:
 
     defaults = RootConfig()
 
-    schema_version = _coerce_value(
+    written_schema_version = _coerce_value(
         raw.get("schema_version", defaults.schema_version),
         int,
         field_name="schema_version",
     )
-    if schema_version != CONFIG_SCHEMA_VERSION:
-        raise ValueError(
-            f"Unsupported schema_version={schema_version} (expected {CONFIG_SCHEMA_VERSION})."
-        )
+    raw, notes = migrate_config_dict(
+        raw, schema_version=written_schema_version, toolkit_version=toolkit_version
+    )
+    schema_version = int(raw["schema_version"])  # now CONFIG_SCHEMA_VERSION
 
-    return canonicalize_config_names(
+    cfg = canonicalize_config_names(
         RootConfig(
             schema_version=schema_version,
             seed=_coerce_value(raw.get("seed", defaults.seed), int, field_name="seed"),
@@ -305,3 +332,4 @@ def load_config(path: str | Path) -> RootConfig:
             else _build_dataclass(defaults.io.__class__, raw["io"], field_name="io"),
         )
     )
+    return cfg, notes, written_schema_version

@@ -8,6 +8,7 @@ from flax import nnx
 
 from ...config.parsing import parse_bool
 from ...models.activations import get_activation
+from ...models.dtypes import parse_dtype_name, resolve_param_dtype
 
 
 @dataclass(frozen=True)
@@ -16,22 +17,34 @@ class MLP2DRegressionConfig:
     activation: str = "gelu"
     use_bias: bool = True
     dtype: str = "float32"
+    param_dtype: str | None = None  # None means "same as dtype"
     channels: int = 2
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "MLP2DRegressionConfig":
-        allowed = {"hidden_sizes", "activation", "use_bias", "dtype", "channels"}
+        allowed = {
+            "hidden_sizes",
+            "activation",
+            "use_bias",
+            "dtype",
+            "param_dtype",
+            "channels",
+        }
         unknown = sorted(set(d) - allowed)
         if unknown:
             raise ValueError(f"Unknown MLP2DRegression params: {unknown}.")
         hs = d.get("hidden_sizes", (256, 256, 256))
         if isinstance(hs, list):
             hs = tuple(int(x) for x in hs)
+        dtype = parse_dtype_name(
+            d.get("dtype", "float32"), field_name="dtype", owner="MLP2DRegression"
+        )
         return cls(
             hidden_sizes=tuple(int(x) for x in hs),
             activation=str(d.get("activation", "gelu")),
             use_bias=parse_bool(d.get("use_bias", True), field_name="use_bias"),
-            dtype=str(d.get("dtype", "float32")),
+            dtype=dtype,
+            param_dtype=resolve_param_dtype(d, dtype=dtype, owner="MLP2DRegression"),
             channels=int(d.get("channels", 2)),
         )
 
@@ -46,6 +59,7 @@ class MLP2DRegression(nnx.Module):
             raise ValueError(f"channels must be > 0, got {cfg.channels}.")
 
         dtype = jnp.dtype(cfg.dtype)
+        param_dtype = jnp.dtype(cfg.param_dtype or cfg.dtype)
         self.out_dim = int(out_dim)
         self.channels = int(cfg.channels)
         sizes = (in_dim,) + tuple(cfg.hidden_sizes) + (self.out_dim * self.channels,)
@@ -58,7 +72,7 @@ class MLP2DRegression(nnx.Module):
                     rngs=rngs,
                     use_bias=cfg.use_bias,
                     dtype=dtype,
-                    param_dtype=dtype,
+                    param_dtype=param_dtype,
                 )
                 for i in range(len(sizes) - 1)
             ]

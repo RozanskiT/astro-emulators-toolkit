@@ -10,6 +10,7 @@ from flax import nnx
 
 from ..config.parsing import parse_bool
 from .activations import get_activation
+from .dtypes import parse_dtype_name, resolve_param_dtype
 
 
 @dataclass(frozen=True)
@@ -20,7 +21,10 @@ class MLPConfig:
     use_bias: bool = True
     reference_width: int | None = None
     reference_depth: int | None = None
+    # compute dtype
     dtype: str = "float32"
+    # parameter storage dtype; None means "same as dtype"
+    param_dtype: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "MLPConfig":
@@ -32,6 +36,7 @@ class MLPConfig:
             "reference_width",
             "reference_depth",
             "dtype",
+            "param_dtype",
         }
         unknown = sorted(set(d) - allowed)
         if unknown:
@@ -52,13 +57,10 @@ class MLPConfig:
         reference_depth = _normalize_optional_positive_int(
             d.get("reference_depth", None), field_name="reference_depth"
         )
-        dtype = str(d.get("dtype", "float32"))
-        try:
-            jnp.dtype(dtype)
-        except TypeError as exc:
-            raise ValueError(
-                f"MLP dtype must be a valid JAX dtype, got {dtype!r}."
-            ) from exc
+        dtype = parse_dtype_name(
+            d.get("dtype", "float32"), field_name="dtype", owner="MLP"
+        )
+        param_dtype = resolve_param_dtype(d, dtype=dtype, owner="MLP")
         return cls(
             hidden_sizes=hidden_sizes,
             activation=activation,
@@ -67,6 +69,7 @@ class MLPConfig:
             reference_width=reference_width,
             reference_depth=reference_depth,
             dtype=dtype,
+            param_dtype=param_dtype,
         )
 
 
@@ -75,6 +78,7 @@ class MLP(nnx.Module):
 
     def __init__(self, *, in_dim: int, out_dim: int, cfg: MLPConfig, rngs: nnx.Rngs):
         dtype = jnp.dtype(cfg.dtype)
+        param_dtype = jnp.dtype(cfg.param_dtype or cfg.dtype)
         sizes = (in_dim,) + tuple(cfg.hidden_sizes) + (out_dim,)
 
         self.layers = nnx.List(
@@ -85,7 +89,7 @@ class MLP(nnx.Module):
                     rngs=rngs,
                     use_bias=cfg.use_bias,
                     dtype=dtype,
-                    param_dtype=dtype,
+                    param_dtype=param_dtype,
                 )
                 for i in range(len(sizes) - 1)
             ]

@@ -9,6 +9,7 @@ from flax import nnx
 
 from ...config.parsing import parse_bool
 from ...models.activations import get_activation
+from ...models.dtypes import parse_dtype_name, resolve_param_dtype
 
 
 def _logspace_frequencies(
@@ -36,6 +37,7 @@ class ExplicitWavelengthMLPConfig:
     activation: str = "gelu"
     use_bias: bool = True
     dtype: str = "float32"
+    param_dtype: str | None = None  # None means "same as dtype"
     channels: int = 1
     frequency_min: float = 0.1
     frequency_max: float = 100.0
@@ -50,6 +52,7 @@ class ExplicitWavelengthMLPConfig:
             "activation",
             "use_bias",
             "dtype",
+            "param_dtype",
             "channels",
             "frequency_min",
             "frequency_max",
@@ -57,6 +60,11 @@ class ExplicitWavelengthMLPConfig:
         unknown = sorted(set(d) - allowed)
         if unknown:
             raise ValueError(f"Unknown ExplicitWavelengthMLP params: {unknown}.")
+        dtype = parse_dtype_name(
+            d.get("dtype", "float32"),
+            field_name="dtype",
+            owner="ExplicitWavelengthMLP",
+        )
         return cls(
             wavelength_embedding_dim=int(d.get("wavelength_embedding_dim", 32)),
             wavelength_hidden_dim=int(d.get("wavelength_hidden_dim", 64)),
@@ -64,7 +72,10 @@ class ExplicitWavelengthMLPConfig:
             joint_hidden_dim=int(d.get("joint_hidden_dim", 128)),
             activation=str(d.get("activation", "gelu")),
             use_bias=parse_bool(d.get("use_bias", True), field_name="use_bias"),
-            dtype=str(d.get("dtype", "float32")),
+            dtype=dtype,
+            param_dtype=resolve_param_dtype(
+                d, dtype=dtype, owner="ExplicitWavelengthMLP"
+            ),
             channels=int(d.get("channels", 1)),
             frequency_min=float(d.get("frequency_min", 0.1)),
             frequency_max=float(d.get("frequency_max", 100.0)),
@@ -101,6 +112,7 @@ class ExplicitWavelengthMLP(nnx.Module):
 
         self.channels = int(cfg.channels)
         dtype = jnp.dtype(cfg.dtype)
+        param_dtype = jnp.dtype(cfg.param_dtype or cfg.dtype)
         n_freq = cfg.wavelength_embedding_dim // 2
         freq = _logspace_frequencies(
             n_freq, cfg.frequency_min, cfg.frequency_max, dtype
@@ -114,7 +126,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
-            param_dtype=dtype,
+            param_dtype=param_dtype,
         )
         self.param_proj_1 = nnx.Linear(
             in_dim,
@@ -122,7 +134,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
-            param_dtype=dtype,
+            param_dtype=param_dtype,
         )
         self.param_proj_2 = nnx.Linear(
             cfg.parameter_hidden_dim,
@@ -130,7 +142,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
-            param_dtype=dtype,
+            param_dtype=param_dtype,
         )
         self.joint_proj_1 = nnx.Linear(
             cfg.wavelength_hidden_dim + cfg.parameter_hidden_dim,
@@ -138,7 +150,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
-            param_dtype=dtype,
+            param_dtype=param_dtype,
         )
         self.joint_proj_2 = nnx.Linear(
             cfg.joint_hidden_dim,
@@ -146,7 +158,7 @@ class ExplicitWavelengthMLP(nnx.Module):
             rngs=rngs,
             use_bias=cfg.use_bias,
             dtype=dtype,
-            param_dtype=dtype,
+            param_dtype=param_dtype,
         )
 
     def _act(self, x: jnp.ndarray) -> jnp.ndarray:

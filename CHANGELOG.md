@@ -25,6 +25,14 @@ All notable user-facing changes to this project will be documented here.
 - `training.async_checkpointing=False` forces synchronous checkpoint writes
   (GPU-instability bisection).
 - `RootConfig.with_updates(...)` accepts per-section dict updates.
+- `model.params.param_dtype` for `mlp` (and the experimental `siren`,
+  `explicit_wavelength_mlp`, `mlp_2d_regression`): parameter storage dtype,
+  defaulting to `dtype`.
+- Config schema migrations (`config/migrations.py`): bundles and configs
+  written by 0.1.x (config schema v1) load with their v1 meaning; settings
+  0.1.x accepted but ignored are replaced by the value in effect and reported
+  in one `LegacyConfigWarning`. Bundles from the `0.2.0.devN` pre-releases
+  (stamped v1, written with v2 meaning) load unchanged.
 - `cuda12` optional extra (`pip install "astro-emulators-toolkit[cuda12]"`).
 - Guard warnings: wavelength-coordinate span vs frequency-encoding periods,
   spectral-resolution kernels large relative to the spectrum length,
@@ -32,6 +40,8 @@ All notable user-facing changes to this project will be documented here.
 
 ### Changed
 
+- `CONFIG_SCHEMA_VERSION` is 2. Bundles saved by 0.1.x still load (see
+  Added); bundles saved by 0.2.0 need toolkit >= 0.2.0.
 - Default learning-rate schedule is linear warmup + cosine decay
   (`warmup_steps=None` means automatic 10% of `num_steps`; previously the
   default was a constant LR). Every applied step now has a strictly positive
@@ -73,6 +83,10 @@ All notable user-facing changes to this project will be documented here.
 
 ### Removed
 
+- `training.val_fraction`: no toolkit version ever read it (`fit()` never
+  splits). Build the validation set with `data.train_val_split(...)` and
+  pass it as `validation_dataset`. Older configs and bundles that contain it
+  still load; the key is dropped in memory.
 - The explicit `jaxlib` dependency: `jax` pins its own compatible `jaxlib`,
   preventing jax/jaxlib/CUDA-plugin version skew on GPU clusters. Use the
   `cuda12` extra for GPU installs.
