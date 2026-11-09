@@ -44,13 +44,14 @@ toolkit passed it. Check 3 compares on the same machine either way.
    matching git revision and putting it first on `PYTHONPATH`:
 
    ```bash
-   git archive v0.1.0 | tar -x -C /tmp/aet-0.1.0     # or the commit for that version
+   git archive v0.1.0 | tar -x -C /tmp/aet-0.1.0     # or that version's tag
    PYTHONPATH=/tmp/aet-0.1.0/src uv run python tests/tracked_emulators/record_references.py
    ```
 
    It records only entries written by the running toolkit version that have
    no reference yet (`--only SLUG`, `--overwrite`, `--any-version` change
-   that). Toolkit `0.2.0.dev0` is commit `65feb0b`.
+   that). Each toolkit version has a tag: `v0.1.0`, `v0.2.0.dev0` (the
+   unreleased pre-release that collaborators' bundles were written with).
 3. Run the check, then commit the entry and its reference.
 
 ## Private emulators

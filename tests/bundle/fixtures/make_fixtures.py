@@ -9,7 +9,7 @@ with an export of the matching git revision on ``PYTHONPATH``:
         uv run python tests/bundle/fixtures/make_fixtures.py
 
     # toolkit 0.2.0.dev0 (stamped config schema v1) -> fixtures/v0_2_0_dev0/
-    git archive 65feb0b | tar -x -C /tmp/aet-0.2.0.dev0
+    git archive v0.2.0.dev0 | tar -x -C /tmp/aet-0.2.0.dev0
     JAX_PLATFORMS=cpu PYTHONPATH=/tmp/aet-0.2.0.dev0/src \
         uv run python tests/bundle/fixtures/make_fixtures.py
 

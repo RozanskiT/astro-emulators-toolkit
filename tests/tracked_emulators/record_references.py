@@ -7,7 +7,7 @@ got. Export that revision and put it first on ``PYTHONPATH``:
     git archive v0.1.0 | tar -x -C /tmp/aet-0.1.0
     PYTHONPATH=/tmp/aet-0.1.0/src uv run python tests/tracked_emulators/record_references.py
 
-    git archive 65feb0b | tar -x -C /tmp/aet-0.2.0.dev0   # 0.2.0.dev0
+    git archive v0.2.0.dev0 | tar -x -C /tmp/aet-0.2.0.dev0
     PYTHONPATH=/tmp/aet-0.2.0.dev0/src uv run python tests/tracked_emulators/record_references.py
 
 By default it records every entry written by the running toolkit version
