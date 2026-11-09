@@ -2,8 +2,7 @@
 
 Deferred, intentionally-not-yet-done work. One entry per item: what, why it
 is deferred, and what doing it properly requires. Remove entries when done
-(and add a `CHANGELOG.md` entry if user-facing). Point-in-time context for
-many of these lives in `ARCHITECTURE_REVIEW_2026-07.md`.
+(and add a `CHANGELOG.md` entry if user-facing).
 
 ## Config / schema
 
