@@ -19,7 +19,19 @@ many of these lives in `ARCHITECTURE_REVIEW_2026-07.md`.
   emulator whose canonical output leaf is named `flux` contradicts the
   "plain semantic keys" doctrine. Deferred to its own PR (if at all): it is
   bundle-compatibility breaking and needs a spec/weights compat decision
-  plus regenerated example assets.
+  plus regenerated example assets. Published intensity bundles already
+  depend on the `flux` leaf (the TransformerPayne entries in
+  `tests/tracked_emulators/registry.toml`, used by SPICE).
+
+## Bundles / release
+
+- **Fingerprint tolerance across platforms.** `prepare_bundle_release`
+  stamps `rtol=1e-5, atol=1e-7`. For float32 TransformerPayne bundles
+  published from Gadi (Linux x86), a macOS arm64 CPU misses that by up to
+  ~6x even with the toolkit that wrote them (two tracked bundles), so
+  downstream users can see fingerprint failures that are only platform
+  numerics. Consider a dtype-aware default tolerance, or documenting the
+  fingerprint as a same-platform check.
 
 ## Training
 

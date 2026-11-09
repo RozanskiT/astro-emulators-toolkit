@@ -185,6 +185,14 @@ uv run pytest tests/examples -q
 Run additional focused suites when the release touches config, data, models,
 tasks, training, or examples.
 
+Check that the tracked pretrained emulators of collaborators still load and
+predict as before (opt-in, downloads from the Hugging Face Hub; see
+[`tests/tracked_emulators/README.md`](tests/tracked_emulators/README.md)):
+
+```bash
+AEMU_TRACKED_EMULATORS=1 uv run pytest tests/tracked_emulators -q -rx
+```
+
 4. Commit, push, open a release PR, and merge only after CI passes, including
    the release-smoke job.
 
