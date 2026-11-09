@@ -4,6 +4,8 @@ All notable user-facing changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-09
+
 ### Added
 
 - `optim.lr_scaling="si"`: legacy standard parameterization (embedding groups
