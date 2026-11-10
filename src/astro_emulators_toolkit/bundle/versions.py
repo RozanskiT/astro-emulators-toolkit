@@ -42,8 +42,9 @@ Compatibility policy
    Loading never mutates the on-disk bundle.
 4. Every version bump must: add the old version to the relevant
    ``SUPPORTED_*`` collection (or consciously decide to hard-break), register
-   a migration for metadata-level changes, and document the change in the
-   CHANGELOG.
+   a migration for metadata-level changes, record the first toolkit release
+   that loads the new version in ``FIRST_LOADING_TOOLKIT`` (published model
+   cards state it), and document the change in the CHANGELOG.
 5. Removing a version from a ``SUPPORTED_*`` collection is a breaking change
    for every bundle already in circulation and must be treated as such.
 """
@@ -102,10 +103,53 @@ def migrate_bundle_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
+# The first released toolkit version that can load each version stamp. Extend
+# this table with every version bump, so that a bundle can state what its
+# users need to install.
+FIRST_LOADING_TOOLKIT: dict[str, dict[Any, str]] = {
+    "bundle_format_version": {1: "0.1.0"},
+    "config_schema_version": {1: "0.1.0", 2: "0.2.0"},
+    "spec_version": {1: "0.1.0"},
+    "weights_layout": {"params_plus_model_state_v1": "0.1.0"},
+}
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def minimum_loading_toolkit_version(metadata: dict[str, Any]) -> str | None:
+    """The oldest released toolkit version able to load a bundle, if known.
+
+    This is what the bundle's users need to install, which can be older than
+    ``provenance.toolkit_version`` (the version that *saved* it). Returns
+    None when a stamp is missing or not in ``FIRST_LOADING_TOOLKIT``.
+    """
+    from ..config.migrations import wrote_v2_meaning
+
+    needed: list[str] = []
+    for field, table in FIRST_LOADING_TOOLKIT.items():
+        stamp = (
+            (metadata.get("spec") or {}).get("spec_version")
+            if field == "spec_version"
+            else metadata.get(field)
+        )
+        if stamp not in table:
+            return None
+        needed.append(table[stamp])
+    provenance = metadata.get("provenance") or {}
+    if wrote_v2_meaning(provenance.get("toolkit_version")):
+        # 0.2.0 pre-releases stamped config schema v1 but wrote keys that
+        # 0.1.x rejects; the first release that loads them is 0.2.0.
+        needed.append("0.2.0")
+    return max(needed, key=_version_key)
+
+
 __all__ = [
     "BUNDLE_FORMAT_VERSION",
     "BUNDLE_METADATA_MIGRATIONS",
     "CONFIG_SCHEMA_VERSION",
+    "FIRST_LOADING_TOOLKIT",
     "SPEC_VERSION",
     "SUPPORTED_BUNDLE_FORMAT_VERSIONS",
     "SUPPORTED_CONFIG_SCHEMA_VERSIONS",
@@ -113,4 +157,5 @@ __all__ = [
     "SUPPORTED_WEIGHTS_LAYOUTS",
     "WEIGHTS_LAYOUT",
     "migrate_bundle_metadata",
+    "minimum_loading_toolkit_version",
 ]

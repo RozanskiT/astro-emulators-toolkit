@@ -803,10 +803,26 @@ class Emulator:
         cache_dir: str | None = None,
         verbose: bool = False,
     ) -> "Emulator":
-        """Download a pretrained bundle snapshot and load it as an emulator."""
+        """Download a pretrained bundle snapshot and load it as an emulator.
+
+        Downloads go to the toolkit's own cache (``~/.cache/astro_emulators_toolkit/hub``,
+        or ``$ASTRO_EMU_CACHE_DIR/hub``) unless ``cache_dir`` is given. Pin
+        ``revision`` (a release tag such as ``"v1.2.0"`` or a commit) to get
+        the same weights every time. Where the emulator came from is recorded
+        in ``bundle_metadata["hub_source"]`` (repo, requested revision, and
+        the resolved commit).
+        """
         local = snapshot_download(
             repo_id,
             revision=revision,
             cache_dir=cache_dir or str(get_cache_dir() / "hub"),
         )
-        return cls.from_bundle(local, verbose=verbose)
+        emu = cls.from_bundle(local, verbose=verbose)
+        commit = Path(local).name  # Hub snapshot folders are named by commit
+        if isinstance(emu.bundle_metadata, dict):
+            emu.bundle_metadata["hub_source"] = {
+                "repo_id": repo_id,
+                "requested_revision": revision,
+                "commit": commit if len(commit) == 40 else None,
+            }
+        return emu

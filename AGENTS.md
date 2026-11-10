@@ -22,7 +22,7 @@ It should stay top-down and cover, at minimum:
 5. using the emulator inside downstream JAX inference;
 6. training a new emulator;
 7. recording I/O/scaling/domain metadata;
-8. preparing a release bundle;
+8. preparing a release bundle, and publishing it on the Hugging Face Hub;
 9. the important conceptual reference sections (config, data, model families, bundle semantics, examples, development notes).
 
 Do not push essential semantics only into examples or tests.
@@ -50,6 +50,7 @@ Supported stable workflows:
 - `apply_jax(...)` and `make_frozen_apply(...)` for JAX-side composition
 - `Emulator.from_config(...)` and `fit(...)` for training
 - `save_bundle(...)` for exporting a portable shared artifact
+- `prepare_bundle_release(...)` and the `aemu` command (`card`, `check`, `publish`) for releasing and publishing a bundle on the Hub
 
 Stable supporting modules that README should document:
 
@@ -117,6 +118,7 @@ Do not quietly blur experimental and stable namespaces.
 Key paths:
 
 - `src/astro_emulators_toolkit/__init__.py`: top-level public package surface
+- `src/astro_emulators_toolkit/cli.py`: the `aemu` command (thin wrapper over `bundle` functions)
 - `src/astro_emulators_toolkit/emulator.py`: high-level facade
 - `src/astro_emulators_toolkit/config/`: config dataclasses and JSON/YAML I/O
 - `src/astro_emulators_toolkit/presets/`: stable config builders
@@ -124,7 +126,7 @@ Key paths:
 - `src/astro_emulators_toolkit/tasks/`: stable tasks
 - `src/astro_emulators_toolkit/training/`: trainer, callbacks, run-state helpers
 - `src/astro_emulators_toolkit/data/`: datasets, loader, preprocessing helpers
-- `src/astro_emulators_toolkit/bundle/`: portable artifact serialization, integrity, release helpers, Hub download
+- `src/astro_emulators_toolkit/bundle/`: portable artifact serialization, integrity, release helpers, model cards (`card.py`), Hub download and publishing (`publish.py`)
 - `src/astro_emulators_toolkit/experimental/`: prototype models/tasks
 - `examples/`: astronomer-facing and maintainer-facing scripts
 - `tests/`: behavioral contracts
@@ -209,7 +211,8 @@ Current package facts:
 - Python requirement: `>=3.11`
 - base dependencies include JAX, Flax, Optax, Orbax checkpointing, safetensors, PyYAML, and Hugging Face download support
 - optional extras are `blackjax` and `viz`
-- Hugging Face support in the stable surface is download-only through `Emulator.from_pretrained(...)`
+- On the Hugging Face Hub, `Emulator` itself stays download-only (`Emulator.from_pretrained(...)`); publishing lives in `bundle.publish` and the `aemu` command, built on the base `huggingface_hub` dependency
+- a published repository = the bundle contract (files in `bundle_integrity.json`) plus free-form documentation files; tags are `v<release_version>` and are not moved without an explicit override
 
 Avoid eager imports that make the base install require optional packages.
 

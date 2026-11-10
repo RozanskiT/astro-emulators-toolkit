@@ -4,6 +4,28 @@ All notable user-facing changes to this project will be documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Publishing released bundles on the Hugging Face Hub: the `aemu` command
+  (`aemu card`, `aemu check`, `aemu publish`) and the functions behind it in
+  `astro_emulators_toolkit.bundle` (`write_model_card`,
+  `check_bundle_for_publishing`, `plan_bundle_upload`, `publish_bundle`).
+  Publishing uploads the bundle contract plus documentation files in one
+  commit, tags it `v<release_version>`, and verifies the published copy. A
+  default `README.md` model card has the author's sections plus a block
+  generated from the bundle metadata (interface table, usage snippet,
+  requirements, provenance). Tags are not moved, older releases and
+  interface changes without a major version are refused, unless overridden.
+- `Emulator.from_pretrained(...)` records the repository, requested revision
+  and resolved commit in `bundle_metadata["hub_source"]`.
+- `bundle.versions.minimum_loading_toolkit_version(metadata)`: the oldest
+  toolkit release that loads a bundle.
+
+### Deprecated
+
+- `RootConfig.hub` (`HubConfig`): never read; setting it warns. It will be
+  removed in 0.3.0 together with the next config schema version.
+
 ## [0.2.0] - 2026-11-09
 
 ### Added

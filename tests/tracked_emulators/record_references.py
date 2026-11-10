@@ -50,9 +50,8 @@ def _check_published_fingerprint(entry, emu) -> dict:
     """
     if not (emu.bundle_metadata or {}).get("fingerprint_evaluation"):
         return {"present": False}
-    from huggingface_hub import snapshot_download
-
     from astro_emulators_toolkit.bundle import verify_bundle_fingerprint_evaluation
+    from astro_emulators_toolkit.bundle.hub import snapshot_download
 
     local_dir = snapshot_download(entry.repo_id, revision=entry.revision)
     try:

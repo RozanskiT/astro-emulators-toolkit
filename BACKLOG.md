@@ -6,6 +6,12 @@ is deferred, and what doing it properly requires. Remove entries when done
 
 ## Config / schema
 
+- **Remove `RootConfig.hub` (`HubConfig`) in 0.3.0.** Deprecated in 0.2.1:
+  never read, and a bundle cannot meaningfully record where it will be
+  published. Removing the field changes the saved config, so 0.2.0 could not
+  read the new bundles; it waits for the next config schema version (v3),
+  whose migration drops the key from older documents (as v2 did for
+  `training.val_fraction`).
 - **Optional `min_lr` floor for the cosine schedule.** The original
   transfer-learning code supported `min_learning_rate`; aemu cosine always
   decays toward zero (reaching it one count past the final applied step).
@@ -52,3 +58,14 @@ is deferred, and what doing it properly requires. Remove entries when done
   the device step carries the whole grid as a jit constant and gathers from
   it). For very large source grids, add a dataset-side/host-side sampled
   wavelength path or precomputed query-index + interpolation-weight tables.
+
+## Examples / downstream composition
+
+- **BlackJAX example fails when `JAX_ENABLE_X64=1` is set.** With x64 on,
+  `examples/advanced/01_use_bundle_in_blackjax.py` stops with a `lax.cond`
+  dtype mismatch: the emulator's log-density stays float32 while BlackJAX's
+  sampler state is float64. TransformerPayne users need x64 globally, so
+  their samplers can hit the same error. Decide whether the example (or a
+  documented pattern) casts the log-density to the sampler's dtype, or
+  whether frozen-apply outputs should follow the input dtype, and test the
+  example under both settings.
