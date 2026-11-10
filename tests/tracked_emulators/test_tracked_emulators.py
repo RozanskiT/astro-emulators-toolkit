@@ -43,7 +43,9 @@ ENTRIES = load_registry()
 
 @pytest.fixture(scope="module", params=ENTRIES, ids=lambda entry: entry.slug)
 def tracked(request):
-    from huggingface_hub import snapshot_download
+    # The toolkit's own download (and cache), so from_pretrained below
+    # reuses the same files instead of downloading them twice.
+    from astro_emulators_toolkit.bundle.hub import snapshot_download
 
     entry = request.param
     local_dir = Path(snapshot_download(entry.repo_id, revision=entry.revision))
