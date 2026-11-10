@@ -4,6 +4,8 @@ All notable user-facing changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-10
+
 ### Added
 
 - Publishing released bundles on the Hugging Face Hub: the `aemu` command
