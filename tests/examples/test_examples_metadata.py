@@ -101,6 +101,13 @@ def test_development_spectral_resolution_postprocess_example_writes_plot() -> No
     assert saved_paths[0].exists()
 
 
+def test_development_publish_example_prepares_a_publishable_bundle() -> None:
+    completed = _run_example("examples/development/19_publish_bundle_to_hub.py")
+    assert "Checklist: ready to publish." in completed.stdout
+    card = Path("examples/development/runs/publish_demo/bundle/README.md")
+    assert "library_name: astro-emulators-toolkit" in card.read_text()
+
+
 def test_reference_flux_bundle_is_loadable() -> None:
     import numpy as np
 

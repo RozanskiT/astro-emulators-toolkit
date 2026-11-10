@@ -8,6 +8,7 @@ The earlier RFF and maintenance scripts stay here as maintainer-only workflows a
 Script `16_benchmark_transformer_payne_flux_training_components.py` is the measurement harness for loader, host-to-device, train-step, and validation-path timing snapshots.
 Script `17_benchmark_cannon_design_matrix.py` compares the current Cannon quadratic feature path against a vectorized candidate before any package-level optimization lands.
 Script `18_spectral_resolution_postprocess.py` visualizes the JAX-side spectral-resolution wrapper on irregular flux and intensity example datasets.
+Script `19_publish_bundle_to_hub.py` walks through publishing a released bundle on the Hugging Face Hub with the Python API behind the `aemu` command (model card, pre-publish checklist, dry-run or real publish).
 
 Typical setup from a clone:
 

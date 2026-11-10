@@ -691,11 +691,26 @@ class IOSpec:
 
 @dataclass(frozen=True)
 class HubConfig:
-    """Optional metadata for download-only pretrained bundle lookup."""
+    """Deprecated and ignored; removed with the next config schema (0.3.0).
 
-    # optional metadata for download-only from_pretrained workflows
+    Nothing ever read these fields. Pass ``repo_id``/``revision`` to
+    ``Emulator.from_pretrained(...)`` or ``aemu publish``; a bundle loaded
+    from the Hub records where it came from in
+    ``emu.bundle_metadata["hub_source"]``.
+    """
+
     repo_id: str | None = None
     revision: str | None = None
+
+    def __post_init__(self):
+        if self.repo_id is not None or self.revision is not None:
+            warnings.warn(
+                "config.hub (HubConfig) is deprecated and ignored, and will be "
+                "removed in astro-emulators-toolkit 0.3.0. Pass repo_id/revision "
+                "to Emulator.from_pretrained(...) or `aemu publish` instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
 
 
 @dataclass(frozen=True)

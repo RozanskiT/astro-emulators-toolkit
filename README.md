@@ -65,6 +65,7 @@ If you are training your own emulator, start with:
 3. [Training a new emulator](#training-a-new-emulator)
 4. [Recording the scientific contract of the emulator](#recording-the-scientific-contract-of-the-emulator)
 5. [Preparing a release bundle for collaborators](#preparing-a-release-bundle-for-collaborators)
+6. [Publishing a bundle on the Hugging Face Hub](#publishing-a-bundle-on-the-hugging-face-hub)
 
 If you are extending the library, also read:
 
@@ -103,7 +104,7 @@ uv add "astro-emulators-toolkit[viz]"
 
 Base installation already includes local bundle loading, Hugging Face bundle download, training, bundle export, safetensors serialization, JSON/YAML config I/O, and the stable model/task/runtime surface.
 
-Hugging Face support in the stable public API is **download-only** through `Emulator.from_pretrained(...)`.
+On the Hugging Face Hub, `Emulator` itself only downloads (`Emulator.from_pretrained(...)`). Publishing a bundle is a separate, explicit step with the `aemu` command installed with the package; see [Publishing a bundle on the Hugging Face Hub](#publishing-a-bundle-on-the-hugging-face-hub).
 
 ## Main public components
 
@@ -197,6 +198,13 @@ Release-oriented helpers for shared artifacts:
 - `prepare_bundle_release(...)`
 - `verify_bundle_fingerprint_evaluation(...)`
 - `load_bundle_fingerprint_evaluation(...)`
+
+and for publishing a released bundle on the Hugging Face Hub (also available as the `aemu` command):
+
+- `write_model_card(...)`
+- `check_bundle_for_publishing(...)`
+- `plan_bundle_upload(...)`
+- `publish_bundle(...)`
 
 ## Load a shared bundle and predict
 
@@ -642,6 +650,58 @@ These are not the same thing.
 
 A release fingerprint is a useful reproducibility smoke test. It is not a substitute for physical validation.
 
+## Publishing a bundle on the Hugging Face Hub
+
+A released bundle directory can be published as a Hub model repository with the `aemu` command, which is installed with the package. Each subcommand wraps a function in `astro_emulators_toolkit.bundle`, so the same steps can be scripted from Python.
+
+```bash
+aemu card   dist/my_flux_bundle_released          # create README.md (the model card)
+# ...write your sections in README.md...
+aemu check  dist/my_flux_bundle_released          # the pre-publish checklist
+aemu publish dist/my_flux_bundle_released my-org/my-flux-emulator --dry-run
+aemu publish dist/my_flux_bundle_released my-org/my-flux-emulator
+```
+
+`aemu publish` refreshes the generated part of the card, uploads the directory in one commit, tags it `v<release_version>`, and then downloads it back to check that it loads, has the same `bundle_id`, and reproduces its fingerprint. It authenticates with your Hugging Face login (`hf auth login`) or `HF_TOKEN`. The token needs write access: a `Write` token, or a fine-grained token with write permission on the target repository (to create a new repository, on your whole namespace or organization); `aemu publish` checks this before changing anything, and `--dry-run` reports it too. Also, `--private` creates a private repository, which `from_pretrained(...)` reads with the same login. `aemu` enables `JAX_ENABLE_X64` itself, which TransformerPayne bundles need.
+
+### What belongs in the directory
+
+- **Bundle contract**: the files listed in `bundle_integrity.json` plus the manifest itself (`config.json`, `metadata.json`, `README.txt`, `weights/`, and the sidecars the metadata refers to). They are verified on every load; do not edit them after `prepare_bundle_release(...)`.
+- **Documentation**: anything else you add, such as the `README.md` model card, `LICENSE`, `CITATION.cff`, or a `docs/` folder with figures and validation notes. Loading ignores these files, so you can document as much as you like. Keep them out of the contract folders (`weights/`, `extras/`, `fingerprint_evaluation/`); `aemu check` refuses files there.
+- **Not uploaded**: hidden files, `__pycache__`, and training state (`checkpoints/`, `checkpoints_best/`, `runs/`). Internal run state is not the sharing contract.
+
+### The model card
+
+The Hub shows `README.md` as the model card. `aemu card` writes a default one with three parts:
+
+1. YAML front matter with `library_name: astro-emulators-toolkit`, which lists the model under this library on the Hub. Add `license:` and, if the training set is on the Hub, `datasets:`.
+2. Your sections: an introduction, intended use and domain, training data, model and training, validation, known limitations, citation and contact. Each starts as an `<!-- aemu:todo ... -->` prompt to replace with your own text.
+3. A generated block between `<!-- aemu:generated:begin -->` and `<!-- aemu:generated:end -->`, built from the bundle metadata: the input/output table (names, meanings, units, intended domain), a usage snippet with the pinned revision, the requirements (the oldest toolkit version that loads the bundle, and `JAX_ENABLE_X64` where needed), release and provenance, and the contract files. `aemu card` and `aemu publish` rebuild only this block; your text is never touched.
+
+The generated table is only as good as the recorded metadata: set channel names, meanings and units in `io` and record an `input_domain` before saving the bundle.
+
+### Before you publish
+
+`aemu check` runs this checklist; errors block publishing, warnings do not.
+
+- **Errors**: the bundle does not load or fails its integrity check; it has no release identity or fingerprint (run `prepare_bundle_release(...)`); the fingerprint does not reproduce (`--allow-fingerprint-mismatch` accepts that, for example for a fingerprint recorded on another platform); documentation files sit inside contract folders; `README.md` is missing, lacks `library_name`, or still has `aemu:todo` prompts.
+- **Warnings**: an input or output leaf without names, meanings or units; no `input_domain`; no `license:`; files that will not be uploaded.
+
+These are portability and documentation checks. The scientific validation you write in the card (held-out errors, residual structure, behavior at the domain edges, comparison with the expensive model) is yours to provide; a fingerprint that reproduces is not evidence of physical accuracy.
+
+### Versions on the Hub
+
+- Each release is one commit on `main` plus the tag `v<release_version>`, using the version given to `prepare_bundle_release(...)`. Users pin a release with `Emulator.from_pretrained("my-org/my-flux-emulator", revision="v1.2.0")`; without `revision` they get the latest `main`.
+- Tags are not moved: publishing an existing tag is refused unless you pass `--overwrite-tag` deliberately (for example to fix a broken release before anyone used it).
+- A release older than the latest tagged one is refused, since `main` would move backwards.
+- A change of the interface since the latest release (input/output structure, channel names, units) needs a new major version, for example `2.0.0` after `1.4.0`; `--allow-interface-change` overrides this.
+- `--no-tag` publishes a documentation-only update to `main` (a better card, a new figure). It is refused if any contract file differs from what `main` already has.
+- By default files you deleted locally stay on the Hub (and are listed); `--mirror` deletes them too.
+
+### Downloading and the cache
+
+`Emulator.from_pretrained(...)` downloads into the toolkit's own cache, `~/.cache/astro_emulators_toolkit/hub` (or `$ASTRO_EMU_CACHE_DIR/hub`, or `$XDG_CACHE_HOME/astro_emulators_toolkit/hub`), unless you pass `cache_dir=...`. The loaded emulator records where it came from in `emu.bundle_metadata["hub_source"]`: the repository, the requested revision, and the resolved commit.
+
 ## API reference: the `Emulator` surface
 
 ### Construction
@@ -687,7 +747,7 @@ Use `from_config(...)` when building a new emulator. Use `from_bundle(...)` or `
 - `training`: workdir, batch size, step schedule, logging/evaluation cadence, and other run controls;
 - `io`: canonical input/output structure plus optional metadata, scaling, and domain;
 - `bundle`: bundle-export options;
-- `hub`: Hugging Face bundle source metadata.
+- `hub`: deprecated and ignored (removed in 0.3.0); pass `repo_id`/`revision` to `from_pretrained(...)` or `aemu publish` instead.
 
 A good default pattern is to start from a preset and then update the pieces
 you need with `with_updates(...)`. A section can be given as a dict of field

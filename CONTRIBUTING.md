@@ -152,10 +152,19 @@ Do not release every merged PR. Release when `main` has a user-facing fix,
 feature, packaging change, or documentation update that package users should get
 from `pip`.
 
-Use patch versions for small fixes, for example `0.1.1`. Use the next minor
-version for new supported features or meaningful public-contract changes, for
-example `0.2.0`. PyPI will not accept re-uploading the same version, so choose
-the version deliberately.
+Before 1.0, the minor number marks bundle and API compatibility:
+
+- **Patch** (`0.2.0` → `0.2.1`): fixes and backward-compatible additions, as
+  long as every bundle and config that the release saves still loads in the
+  first release of the series (`0.2.0`) — no version-stamp bump in
+  `bundle/versions.py` (config schema, bundle format, spec, weights layout) —
+  and no existing API or default changes.
+- **Minor** (`0.2.x` → `0.3.0`): anything that changes what bundles or
+  configs contain (a version-stamp bump), changes defaults, or removes or
+  breaks API. Removals announced as deprecations wait for the next minor.
+
+PyPI will not accept re-uploading the same version, so choose the version
+deliberately.
 
 1. Start a release branch from an up-to-date `main`.
 

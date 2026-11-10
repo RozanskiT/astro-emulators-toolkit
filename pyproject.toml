@@ -39,6 +39,9 @@ dependencies = [
 ]
 requires-python = ">=3.11"
 
+[project.scripts]
+aemu = "astro_emulators_toolkit.cli:main"
+
 [project.optional-dependencies]
 blackjax = [
     "blackjax>=1.2.5",
