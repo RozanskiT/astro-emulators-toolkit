@@ -794,6 +794,77 @@ cfg = load_config("runs/demo/config.yaml")
 
 Prototype model families and tasks live under `experimental/...`. They are useful for research and development but are intentionally outside the stable public contract.
 
+The wavelength-explicit MHE (multiresolution hash encoding) families are:
+
+- `experimental/mhe_mlp`: a shared parameter MLP followed by a wavelength
+  decoder that receives learned hash features at every hidden layer.
+- `experimental/mhe_transformer_payne`: parameter tokens and cross-attention,
+  with a learned hash encoding and projection for wavelength queries.
+
+Both reuse the `transformer_payne` runtime adapter: the same canonical input/output
+keys, channel metadata, custom nested leaf names, flux/intensity device batch
+transforms, `fit`, `predict`, JAX composition, and portable bundle APIs. Parameters
+have shape `(batch, parameter_dim)` and public wavelengths have shape
+`(batch, n_wavelength)`. Outputs have shape `(batch, n_wavelength)` for one channel,
+or `(batch, n_wavelength, channels)` otherwise. Initialize from an example batch
+or `init_hints={"parameter_dim": ...}`.
+
+Start from the existing flux or intensity preset and replace the model spec:
+
+```python
+from dataclasses import replace
+from astro_emulators_toolkit import Emulator
+from astro_emulators_toolkit.presets import transformer_payne_flux
+
+cfg = transformer_payne_flux(profile="smoke")
+cfg = replace(cfg, model=replace(
+    cfg.model,
+    name="experimental/mhe_transformer_payne",
+    params={**cfg.model.params,
+            "mhe": {"levels": 8, "log2_hashmap_size": 12,
+                    "wavelength_range": [0.0, 1.0]}},
+))
+emu = Emulator.from_config(cfg)
+# Use explicitly preprocessed data and emu.make_device_batch_transform(...)
+# with emu.fit(...), just as for transformer_payne.
+```
+
+For `experimental/mhe_mlp`, replace the model name and parameter dictionary with,
+for example, `{"hidden_sizes": [128, 128, 128], "parameter_hidden_sizes": [128, 128],
+"min_period": 1e-4, "max_period": 2.0, "mhe": {"wavelength_range": [0.0, 1.0]}}`.
+The transformer uses the usual `dim`, `dim_head`, `no_tokens`, `no_layers`, and
+`dim_ff_multiplier`, plus optional `parameter_hidden_dim`, per-block
+`ff_hidden_sizes`, and `head_hidden_dim`. Architecture parameters and the stable
+models' optional `mup`/`mup_depth` LR policies are not interchangeable: use
+`lr_scaling=None` or an explicit Optax optimizer for the MHE families.
+
+MHE preprocessing is explicit. `mhe.wavelength_range` (default `[0, 1]`),
+`min_period`, and `max_period` are in the wavelength coordinates actually supplied
+to the model, whether physical, normalized, or logarithmic. Neither model takes a
+logarithm or applies reference scaling automatically. Record transforms, units,
+scaling, and intended-use bounds in the usual I/O metadata. Enable
+`JAX_ENABLE_X64=1` and preserve float64 wavelengths even with float32 weights.
+
+The nested `mhe` configuration also accepts `levels`, `features_per_level`,
+`log2_hashmap_size`, and `table_init_scale`. Each level linearly interpolates
+learned features with cell widths geometrically spaced from `max_period / 2` to
+`min_period / 2`. Power-of-two tables are capped at `2 ** log2_hashmap_size`, with
+wrapped indices. The range sets the grid origin and allocation; it does not clip
+queries or define a safe extrapolation policy. Wavelength derivatives are
+piecewise defined at grid boundaries. The transformer also supports
+`projection_hidden_dim`, `projection_activation`, `projection_bias`, and optional
+`normalize_output` inside `mhe`; normalization acts on encoded features, not
+physical spectra, and defaults to off.
+
+These models train entirely within aemu without the original development project
+or pretrained weights. Implementation comparisons and bundle round trips establish
+numerical parity and portability; held-out residuals, boundaries, and realistic
+inference tests remain separate scientific validation work.
+
+Run [the MHE flux example](examples/experimental/08_train_mhe_flux.py) with
+`--model mhe_mlp` or `--model mhe_transformer_payne` for a complete native workflow
+with explicit input normalization and bundle export.
+
 ### Transformer-specific notes
 
 The `transformer_payne` family **requires** `JAX_ENABLE_X64=1`: wavelengths are always handled in float64 up to the embedding cast, and model construction fails without it. Enable it before building or loading these models:
