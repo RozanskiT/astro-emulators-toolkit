@@ -11,6 +11,8 @@ import pytest
 from flax import nnx
 
 from astro_emulators_toolkit import Emulator
+from astro_emulators_toolkit.bundle import write_model_card
+from astro_emulators_toolkit.bundle.versions import minimum_loading_toolkit_version
 from astro_emulators_toolkit.config import (
     ModelSpec,
     OptimConfig,
@@ -107,6 +109,10 @@ def test_native_training_batch_transforms_and_bundle(tmp_path, family, channels)
     assert np.isfinite(grad).all() and np.any(grad != 0)
     path = emu.save_bundle(tmp_path / "bundle", extras={"wavelengths": wave})
     restored = Emulator.from_bundle(path)
+    assert minimum_loading_toolkit_version(restored.bundle_metadata) == "0.2.2"
+    card = write_model_card(path).read_text()
+    assert "astro-emulators-toolkit>=0.2.2" in card
+    assert "JAX_ENABLE_X64=1" in card
     assert restored.model_family_id == f"experimental_{family}_v1"
     assert (
         restored.bundle_metadata["runtime_contract"]

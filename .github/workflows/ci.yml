@@ -126,6 +126,8 @@ jobs:
           uv run --frozen pytest -q tests/models/test_transformer_payne_bundle.py
           uv run --frozen pytest -q tests/models/test_transformer_payne_channel_contract.py
           uv run --frozen pytest -q tests/models/test_transformer_payne_wavelength_ranges.py
+      - name: Experimental MHE regression suite
+        run: uv run --frozen pytest -q tests/models/test_mhe.py
 
   release-smoke:
     strategy:
@@ -210,6 +212,22 @@ jobs:
           .release-venv/bin/python -m ensurepip --upgrade
           .release-venv/bin/python -m pip install --upgrade pip
           .release-venv/bin/python -m pip install dist/*.whl
+      - name: Verify imports come from the installed wheel
+        run: |
+          .release-venv/bin/python - <<'PYTHON'
+          from importlib.metadata import version
+          from pathlib import Path
+          import sys
+          import astro_emulators_toolkit as aet
+
+          assert Path(aet.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+          assert version("astro-emulators-toolkit") == aet.__version__
+          print(f"Installed toolkit {aet.__version__}: {aet.__file__}")
+          PYTHON
+      - name: Train and reload experimental MHE models from installed wheel
+        run: |
+          .release-venv/bin/python examples/experimental/08_train_mhe_flux.py --model mhe_mlp --workdir .release-smoke/mhe_mlp
+          .release-venv/bin/python examples/experimental/08_train_mhe_flux.py --model mhe_transformer_payne --workdir .release-smoke/mhe_transformer_payne
       - name: Load demo bundle
         run: .release-venv/bin/python examples/basic/02_load_bundle_predict.py
       - name: Load freshly exported bundle from installed wheel

@@ -114,6 +114,13 @@ FIRST_LOADING_TOOLKIT: dict[str, dict[Any, str]] = {
 }
 
 
+# New model families can require a newer runtime without changing bundle stamps.
+_MODEL_FIRST_LOADING_TOOLKIT = {
+    "experimental_mhe_mlp_v1": "0.2.2",
+    "experimental_mhe_transformer_payne_v1": "0.2.2",
+}
+
+
 def _version_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split("."))
 
@@ -137,6 +144,11 @@ def minimum_loading_toolkit_version(metadata: dict[str, Any]) -> str | None:
         if stamp not in table:
             return None
         needed.append(table[stamp])
+    family_minimum = _MODEL_FIRST_LOADING_TOOLKIT.get(
+        str(metadata.get("model_family_id") or "")
+    )
+    if family_minimum is not None:
+        needed.append(family_minimum)
     provenance = metadata.get("provenance") or {}
     if wrote_v2_meaning(provenance.get("toolkit_version")):
         # 0.2.0 pre-releases stamped config schema v1 but wrote keys that

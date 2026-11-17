@@ -835,7 +835,7 @@ for example, `{"hidden_sizes": [128, 128, 128], "parameter_hidden_sizes": [128, 
 The transformer uses the usual `dim`, `dim_head`, `no_tokens`, `no_layers`, and
 `dim_ff_multiplier`, plus optional `parameter_hidden_dim`, per-block
 `ff_hidden_sizes`, and `head_hidden_dim`. Architecture parameters and the stable
-models' optional `mup`/`mup_depth` LR policies are not interchangeable: use
+models' optional `si`/`mup`/`mup_depth` LR policies are not interchangeable: use
 `lr_scaling=None` or an explicit Optax optimizer for the MHE families.
 
 MHE preprocessing is explicit. `mhe.wavelength_range` (default `[0, 1]`),
@@ -856,7 +856,8 @@ piecewise defined at grid boundaries. The transformer also supports
 `normalize_output` inside `mhe`; normalization acts on encoded features, not
 physical spectra, and defaults to off.
 
-These models train entirely within aemu without the original development project
+These families require toolkit 0.2.2 or newer, including when loading their bundles.
+They train entirely within aemu without the original development project
 or pretrained weights. Implementation comparisons and bundle round trips establish
 numerical parity and portability; held-out residuals, boundaries, and realistic
 inference tests remain separate scientific validation work.

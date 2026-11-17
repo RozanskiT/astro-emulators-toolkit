@@ -34,7 +34,11 @@ GENERATED_END = "<!-- aemu:generated:end -->"
 TODO_MARKER = "<!-- aemu:todo"
 
 # Families whose wavelength handling needs JAX float64.
-_X64_FAMILY_PREFIXES = ("transformer_payne",)
+_X64_FAMILY_PREFIXES = (
+    "transformer_payne",
+    "experimental_mhe_mlp_",
+    "experimental_mhe_transformer_payne_",
+)
 
 _AUTHOR_SECTIONS = (
     (
