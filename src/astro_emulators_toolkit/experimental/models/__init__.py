@@ -3,16 +3,33 @@ from __future__ import annotations
 from typing import Any
 
 from ...models import ModelRegistryEntry
-from .explicit_wavelength_mlp import ExplicitWavelengthMLP, ExplicitWavelengthMLPConfig
-from .mlp_2d_regression import MLP2DRegression, MLP2DRegressionConfig
-from .siren import Siren, SirenConfig
+from ...models.runtime_adapters import TransformerPayneRuntimeAdapter
 from ..runtime_adapters import (
     ExplicitWavelengthMLPRuntimeAdapter,
     MLP2DRegressionRuntimeAdapter,
     SirenRuntimeAdapter,
 )
+from .explicit_wavelength_mlp import ExplicitWavelengthMLP, ExplicitWavelengthMLPConfig
+from .mhe import MHEMLP, MHETransformerPayne
+from .mhe_config import MHEMLPConfig, MHETransformerPayneConfig
+from .mlp_2d_regression import MLP2DRegression, MLP2DRegressionConfig
+from .siren import Siren, SirenConfig
 
 _EXPERIMENTAL_MODEL_REGISTRY: dict[str, ModelRegistryEntry] = {
+    "mhe_mlp": ModelRegistryEntry(
+        public_name="experimental/mhe_mlp",
+        family_id="experimental_mhe_mlp_v1",
+        config_cls=MHEMLPConfig,
+        model_cls=MHEMLP,
+        runtime=TransformerPayneRuntimeAdapter(),
+    ),
+    "mhe_transformer_payne": ModelRegistryEntry(
+        public_name="experimental/mhe_transformer_payne",
+        family_id="experimental_mhe_transformer_payne_v1",
+        config_cls=MHETransformerPayneConfig,
+        model_cls=MHETransformerPayne,
+        runtime=TransformerPayneRuntimeAdapter(),
+    ),
     "explicit_wavelength_mlp": ModelRegistryEntry(
         public_name="experimental/explicit_wavelength_mlp",
         family_id="experimental_explicit_wavelength_mlp_v1",

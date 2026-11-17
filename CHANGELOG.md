@@ -4,6 +4,25 @@ All notable user-facing changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-17
+
+### Added
+
+- Experimental `experimental/mhe_mlp` and `experimental/mhe_transformer_payne`
+  model families, with learned multiresolution hash encodings for wavelength
+  queries. Both use the TransformerPayne canonical I/O, training, JAX inference,
+  and portable bundle workflows. They require float64 wavelengths and explicit
+  wavelength-coordinate bounds/periods; architecture-specific LR scaling is not
+  supported (`optim.lr_scaling=None`).
+- A native MHE flux training example, focused regression tests, and CI checks
+  that train and reload both models from the installed wheel on Python 3.11–3.13.
+- Generated MHE model cards state the required toolkit version (`>=0.2.2`) and
+  `JAX_ENABLE_X64=1` setting.
+
+Existing stable APIs, defaults, and bundle/config version stamps are unchanged.
+Existing bundles remain supported. Bundles using the new experimental families
+require toolkit 0.2.2 or newer; earlier releases do not implement these families.
+
 ## [0.2.1] - 2026-11-10
 
 ### Added

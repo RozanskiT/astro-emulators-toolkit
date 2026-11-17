@@ -155,13 +155,18 @@ from `pip`.
 Before 1.0, the minor number marks bundle and API compatibility:
 
 - **Patch** (`0.2.0` → `0.2.1`): fixes and backward-compatible additions, as
-  long as every bundle and config that the release saves still loads in the
-  first release of the series (`0.2.0`) — no version-stamp bump in
+  long as bundles and configs for existing families still load in the first
+  release of the series (`0.2.0`) — no version-stamp bump in
   `bundle/versions.py` (config schema, bundle format, spec, weights layout) —
   and no existing API or default changes.
 - **Minor** (`0.2.x` → `0.3.0`): anything that changes what bundles or
   configs contain (a version-stamp bump), changes defaults, or removes or
   breaks API. Removals announced as deprecations wait for the next minor.
+
+A newly added experimental model family can ship in a patch release while
+keeping existing-family contracts unchanged. Bundles using that new family
+require the first toolkit release implementing it; record that minimum version
+in the generated model-card requirements and release notes.
 
 PyPI will not accept re-uploading the same version, so choose the version
 deliberately.
