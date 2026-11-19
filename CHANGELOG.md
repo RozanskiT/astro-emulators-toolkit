@@ -6,8 +6,9 @@ All notable user-facing changes to this project will be documented here.
 
 - Added `experimental/interpolated_payne`, a jointly trained 128-mode spectral
   model with direct linear interpolation and the TransformerPayne runtime
-  contract. The ExoJAX helper returns physical intensities on a supplied vacuum
-  wavelength grid. Bundles using this family require a build containing it.
+  contract. Bundles using this family require a build containing it.
+- TransformerPayne, both MHE families, and Interpolated Payne now support the
+  same singleton-batch broadcasting and experimental ExoJAX physical predictor.
 
 ## [0.2.2] - 2026-11-17
 

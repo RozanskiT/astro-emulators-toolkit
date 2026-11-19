@@ -10,7 +10,7 @@ from flax import nnx
 
 from astro_emulators_toolkit import Emulator
 from astro_emulators_toolkit.bundle import write_model_card
-from astro_emulators_toolkit.config import IOTreeSpec, OptimConfig
+from astro_emulators_toolkit.config import OptimConfig
 from astro_emulators_toolkit.data import TreeArrayDataset
 from astro_emulators_toolkit.experimental.models.interpolated_payne import (
     InterpolatedPayne,
@@ -120,36 +120,6 @@ def test_joint_fit_frozen_jax_and_bundle(tmp_path, channels):
         jnp.asarray(p[:2])
     )
     assert np.isfinite(g).all() and np.any(g != 0)
-
-
-def test_custom_role_paths():
-    preset = transformer_payne_flux(profile="smoke")
-    cfg = replace(
-        preset,
-        model=replace(
-            preset.model,
-            name=FAMILY,
-            params=dict(grid_segments=[[0, 1, 9]], rank=3),
-            init_hints={"parameter_dim": 2},
-        ),
-        io=replace(
-            preset.io,
-            inputs=IOTreeSpec(
-                structure_tree={"stars": {"labels": None}, "obs": {"wavelengths": None}}
-            ),
-            outputs=IOTreeSpec(structure_tree={"spectrum": {"intensity": None}}),
-            input_domain=None,
-            reference_scaling_inputs=None,
-            reference_scaling_outputs=None,
-        ),
-    )
-    emu = Emulator.from_config(cfg)
-    x = {
-        "stars": {"labels": np.ones((1, 2))},
-        "obs": {"wavelengths": np.array([[0.3, 0.8]])},
-    }
-    y = emu.apply_jax(x)["spectrum"]["intensity"]
-    assert y.shape == (1, 2) and np.isfinite(y).all()
 
 
 @pytest.mark.parametrize(

@@ -29,6 +29,17 @@ def _validate_dims(in_dim, out_dim):
         )
 
 
+def _broadcast_spectral_inputs(labels, wavelengths):
+    """Match TransformerPayne's broadcasting of singleton atmosphere or grid batches."""
+    labels, wavelengths = jnp.asarray(labels), jnp.asarray(wavelengths)
+    if labels.ndim == wavelengths.ndim == 2 and len(labels) != len(wavelengths):
+        if len(wavelengths) == 1:
+            return labels, wavelengths[0]  # shared query vector
+        if len(labels) == 1:
+            labels = jnp.broadcast_to(labels, (len(wavelengths), labels.shape[1]))
+    return labels, wavelengths
+
+
 def _labels(labels, in_dim, dtype):
     labels = jnp.asarray(labels, dtype=dtype)
     if labels.ndim != 2 or labels.shape[1] != in_dim:
@@ -221,7 +232,7 @@ class MHETransformerPayne(nnx.Module):
 
     def __call__(self, x, *, train: bool = False, rngs: nnx.Rngs | None = None):
         del train, rngs
-        labels, wavelengths = x
+        labels, wavelengths = _broadcast_spectral_inputs(*x)
         return self.predict_queries(self.prepare_context(labels), wavelengths)
 
 
@@ -298,5 +309,5 @@ class MHEMLP(nnx.Module):
 
     def __call__(self, x, *, train: bool = False, rngs: nnx.Rngs | None = None):
         del train, rngs
-        labels, wavelengths = x
+        labels, wavelengths = _broadcast_spectral_inputs(*x)
         return self.predict_queries(self.prepare_context(labels), wavelengths)

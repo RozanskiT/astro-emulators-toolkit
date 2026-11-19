@@ -1,7 +1,7 @@
-"""Train an experimental wavelength-explicit family with the TransformerPayne flux workflow.
+"""Train TransformerPayne or an experimental wavelength-explicit model on the same flux data.
 
 Data: shipped irregular_flux Korg/MARCS spectra, deterministic 90/10 split.
-Creates: examples/runs/experimental_<model>_flux/{config.json,bundle} by default.
+Creates: examples/runs/<family>_flux/{config.json,bundle} by default.
 Runtime: seconds for the default smoke profile; minutes for cpu_recommended.
 Optional extras: none. Requires JAX_ENABLE_X64=1 (set below before importing JAX).
 Inputs are explicitly min/max normalized; continuum-normalized flux is unchanged.
@@ -33,7 +33,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--model",
-        choices=("mhe_mlp", "mhe_transformer_payne", "interpolated_payne"),
+        choices=(
+            "transformer_payne",
+            "mhe_mlp",
+            "mhe_transformer_payne",
+            "interpolated_payne",
+        ),
         default="mhe_mlp",
     )
     parser.add_argument(
@@ -41,8 +46,15 @@ def main() -> None:
     )
     parser.add_argument("--workdir", type=Path)
     args = parser.parse_args()
+    family = (
+        args.model
+        if args.model == "transformer_payne"
+        else f"experimental/{args.model}"
+    )
     workdir = args.workdir or (
-        Path(__file__).resolve().parents[1] / "runs" / f"experimental_{args.model}_flux"
+        Path(__file__).resolve().parents[1]
+        / "runs"
+        / f"{family.replace('/', '_')}_flux"
     )
     smoke = args.profile == "smoke"
     x_train, y_train, x_val, y_val, wave = split_randomized_flux_arrays(seed=2)
@@ -51,7 +63,11 @@ def main() -> None:
 
     cfg = transformer_payne_flux(profile=args.profile, workdir=str(workdir))
     # Keep the preset's task, optimizer, training, and runtime I/O contract.
-    if args.model == "interpolated_payne":
+    if args.model == "transformer_payne":
+        # Frequency periods use the normalized wavelength coordinate of this example.
+        spacing = float(np.min(np.diff(wave)) / (wave[-1] - wave[0]))
+        params = {**cfg.model.params, "min_period": spacing}
+    elif args.model == "interpolated_payne":
         params = {"grid_segments": [[0.0, 1.0, len(wave)]]}
     else:
         params = (
@@ -70,7 +86,7 @@ def main() -> None:
         )
     cfg = replace(
         cfg,
-        model=replace(cfg.model, name=f"experimental/{args.model}", params=params),
+        model=replace(cfg.model, name=family, params=params),
         io=replace(
             cfg.io,
             inputs=IOTreeSpec(

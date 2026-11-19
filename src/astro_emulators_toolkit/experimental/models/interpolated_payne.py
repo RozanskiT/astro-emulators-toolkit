@@ -12,7 +12,8 @@ from flax import nnx
 
 from ...models.activations import get_activation
 from ...models.mlp import MLP, MLPConfig
-from .mhe import _labels, _waves
+from ..exojax import make_exojax_predictor as make_exojax_predictor
+from .mhe import _broadcast_spectral_inputs, _labels, _waves
 from .mhe_config import JSONConfig, choice, finite_float, positive_int, widths
 
 
@@ -165,7 +166,7 @@ class InterpolatedPayne(nnx.Module):
         return self.predict_queries(context, w[:, None])[:, 0]
 
     def __call__(self, x, *, train=False, rngs=None):
-        labels, wavelengths = x
+        labels, wavelengths = _broadcast_spectral_inputs(*x)
         return self.predict_queries(self.prepare_context(labels), wavelengths)
 
 
@@ -215,37 +216,13 @@ def make_native_apply(emu, *, linear_intensity=False):
     return apply
 
 
-def make_exojax_predictor(emu):
-    """Freeze the ExoJAX mapping from physical labels and vacuum Å to specific intensity.
-
-    Accepts (8,) or (batch, 8) labels and a shared (queries,) grid. The result
-    is (batch, queries) in the bundle's physical intensity units.
-    """
-    if (
-        emu.cfg.model.params.get("channels", 1) != 1
-        or emu.cfg.model.params.get("log10_bounds") is None
-        or emu.bundle_extras.get("wavelength_coordinate")
-        != "log10_angstrom_legacy_roundtrip"
-    ):
-        raise ValueError("Expected an ExoJAX log-wavelength, single-intensity bundle")
+def _make_direct_intensity_apply(emu):
+    if emu.cfg.model.params.get("log10_bounds") is None:
+        raise ValueError("Physical intensity requires log10_bounds")
     native = make_native_apply(emu, linear_intensity=True)
     segments = emu.cfg.model.params["grid_segments"]
-    ref = emu.reference_scaling_inputs
-    low = jnp.asarray(ref["min_tree"]["parameters"], dtype=jnp.float64)
-    span = jnp.asarray(ref["max_tree"]["parameters"], dtype=jnp.float64) - low
-    w0, w1 = emu.bundle_extras["preprocessing"]["legacy_wavelength_bounds"]
 
-    @jax.jit
-    def predict(parameters, wavelength_angstrom):
-        p = jnp.atleast_2d(jnp.asarray(parameters, dtype=jnp.float64))
-        w = jnp.asarray(wavelength_angstrom, dtype=jnp.float64)
-        if p.ndim != 2 or p.shape[-1] != 8 or w.ndim != 1:
-            raise ValueError(
-                "Expected physical labels (8,) or (B,8) and wavelengths (Q,)"
-            )
-        labels = ((p - low) / span).astype(jnp.float32)
-        # Reproduce the bundle's wavelength normalization round trip at chip edges.
-        q = jnp.log10(w0 + ((w - w0) / (w1 - w0)) * (w1 - w0))
-        return _interpolate(native(labels), q, segments).astype(jnp.float64)
+    def apply(labels, wavelengths):
+        return _interpolate(native(labels), wavelengths, segments).astype(jnp.float64)
 
-    return predict
+    return apply

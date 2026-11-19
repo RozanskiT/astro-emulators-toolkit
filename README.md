@@ -895,22 +895,42 @@ knots, interpolates **physical intensity** in float32, and returns scaled log10 
 in the canonical output leaf. The ExoJAX bundle also selects its trained
 `features="exojax_v1"` label transform. Other models use the supplied labels directly.
 
-For the trained ExoJAX bundle, the experimental helper below takes the same
-ordered physical labels and shared vacuum wavelengths in Å as the MHE bundle's
-physical predictor. It returns physical specific intensity directly as a
-`(batch, wavelengths)` JAX array, including for a single label vector.
+The [flux training example](examples/experimental/08_train_mhe_flux.py) accepts
+`--model interpolated_payne` and exports and reloads a portable bundle. Bundles
+using this experimental family require a checkout or build containing it.
+
+### Swapping wavelength-explicit models in an ExoJAX retrieval
+
+For `transformer_payne`, `experimental/mhe_mlp`, `experimental/mhe_transformer_payne`,
+and `experimental/interpolated_payne`, the same canonical call accepts atmospheric
+parameters `(B, P)` and float64 wavelengths `(B, Q)`. Each row can have its own
+Doppler-shifted wavelengths. A singleton batch on either input broadcasts across
+the other input, so `(1, Q)` shares one grid and `(1, P)` shares one atmosphere.
+Keep the input/output leaf names, channel order,
+and preprocessing from the bundle when using `predict`, `apply_jax`, or
+`make_frozen_apply`. All four use the same flux and intensity training batch transforms. In the
+[flux training example](examples/experimental/08_train_mhe_flux.py) select any
+of the four with `--model`, using the family name without the namespace prefix.
+
+For the single-intensity ExoJAX bundles, only the bundle path changes in the physical
+predictor below. Supply physical labels in the bundle’s eight-parameter order
+and a shared float64 grid of vacuum wavelengths in Å. A single label vector
+returns `(1, Q)` and a batch returns `(B, Q)`, both in the original specific
+intensity units per wavenumber. Recorded chip gaps and out-of-band wavelengths
+return NaN. Apply `jax.vmap(predict)` over surface elements for per-element grids.
 
 ```python
-from astro_emulators_toolkit.experimental.models.interpolated_payne import make_exojax_predictor
+from astro_emulators_toolkit.experimental.exojax import make_exojax_predictor
 
 emu = Emulator.from_bundle(bundle_path)
 predict = make_exojax_predictor(emu)
 intensity = predict(physical_labels, wavelength_angstrom)
 ```
 
-The [flux training example](examples/experimental/08_train_mhe_flux.py) accepts
-`--model interpolated_payne` and exports and reloads a portable bundle. Bundles
-using this experimental family require a checkout or build containing it.
+The older ExoJAX TransformerPayne bundles use their recorded affine wavelength
+scale. The released MHE and 128-mode bundles use their recorded log10 wavelength
+convention. The predictor applies these conversions explicitly and uses the
+direct intensity interpolation path for the 128-mode model.
 
 ### Transformer-specific notes
 

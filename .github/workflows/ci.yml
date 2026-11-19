@@ -127,7 +127,7 @@ jobs:
           uv run --frozen pytest -q tests/models/test_transformer_payne_channel_contract.py
           uv run --frozen pytest -q tests/models/test_transformer_payne_wavelength_ranges.py
       - name: Experimental wavelength-explicit regression suite
-        run: uv run --frozen pytest -q tests/models/test_mhe.py tests/models/test_interpolated_payne.py
+        run: uv run --frozen pytest -q tests/models/test_mhe.py tests/models/test_interpolated_payne.py tests/models/test_wavelength_explicit_contract.py
 
   release-smoke:
     strategy:
@@ -224,8 +224,9 @@ jobs:
           assert version("astro-emulators-toolkit") == aet.__version__
           print(f"Installed toolkit {aet.__version__}: {aet.__file__}")
           PYTHON
-      - name: Train and reload experimental wavelength-explicit models from installed wheel
+      - name: Train and reload wavelength-explicit models from installed wheel
         run: |
+          .release-venv/bin/python examples/experimental/08_train_mhe_flux.py --model transformer_payne --workdir .release-smoke/transformer_payne
           .release-venv/bin/python examples/experimental/08_train_mhe_flux.py --model mhe_mlp --workdir .release-smoke/mhe_mlp
           .release-venv/bin/python examples/experimental/08_train_mhe_flux.py --model mhe_transformer_payne --workdir .release-smoke/mhe_transformer_payne
           .release-venv/bin/python examples/experimental/08_train_mhe_flux.py --model interpolated_payne --workdir .release-smoke/interpolated_payne
