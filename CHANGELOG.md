@@ -8,10 +8,11 @@ All notable user-facing changes to this project will be documented here.
 
 ### Added
 
-- Added `experimental/spectral_basis_mlp`, a jointly trained 128-mode spectral
-  model with direct linear interpolation and the TransformerPayne runtime
-  contract. Bundles using this family require astro-emulators-toolkit 0.2.3
-  or newer. Existing bundle and configuration format versions are unchanged.
+- Added `experimental/spectral_basis_mlp`, which jointly trains an MLP and a
+  spectral basis of configurable rank. It uses direct linear interpolation and
+  the TransformerPayne runtime contract. Bundles using this family require
+  astro-emulators-toolkit 0.2.3 or newer. Existing bundle and configuration
+  format versions are unchanged.
 - TransformerPayne, both MHE families, and Spectral Basis MLP now support the
   same singleton-batch broadcasting for atmospheric labels and wavelength grids.
 - Renamed the experimental flux training example to `08_train_wavelength_explicit_flux.py`.

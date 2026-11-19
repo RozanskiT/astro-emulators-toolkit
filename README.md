@@ -872,10 +872,11 @@ with explicit input normalization and bundle export.
 inputs and outputs as TransformerPayne and the MHE families. Its MLP takes each
 row of `parameters` directly. For min–max scaled training, call `normalize_tree`
 on the original inputs and record the same bounds in `reference_scaling_inputs`.
-By default, four 256-unit SiLU layers predict 128 coefficients once per row.
-Each coefficient weights one learned basis spectrum. Their sum plus a learned mean
-gives the spectrum on the native knots. Ordinary `fit` learns the MLP, basis
-and mean together.
+Set `rank` to choose the number of learned basis spectra (default 128).
+The MLP predicts one coefficient per basis spectrum for each input row. Its
+default architecture has four 256-unit SiLU layers. The weighted sum plus a
+learned mean gives the spectrum on the native knots. Ordinary `fit` learns the
+MLP, basis and mean together.
 
 Start with the same flux or intensity preset and replace its model settings:
 
