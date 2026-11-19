@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any
 
 from ...models import ModelRegistryEntry
@@ -69,13 +68,6 @@ def get_experimental_model_registry() -> dict[str, ModelRegistryEntry]:
 
 def get_experimental_model_entry(name: str) -> ModelRegistryEntry:
     key = str(name).lower()
-    # The trained pre-release bundle records both the prototype name and its family ID.
-    if key == "interpolated_payne":
-        return replace(
-            _EXPERIMENTAL_MODEL_REGISTRY["spectral_basis_mlp"],
-            public_name="experimental/interpolated_payne",
-            family_id="experimental_interpolated_payne_v1",
-        )
     if key not in _EXPERIMENTAL_MODEL_REGISTRY:
         raise KeyError(
             f"Unknown experimental model '{name}'. Available={list(_EXPERIMENTAL_MODEL_REGISTRY)}"

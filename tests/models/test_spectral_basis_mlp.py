@@ -130,44 +130,29 @@ def test_bad_grid(segments):
         SpectralBasisMLPConfig(grid_segments=segments, rank=1)
 
 
-@pytest.mark.parametrize(
-    ("family", "family_id"),
-    [
-        (FAMILY, "experimental_spectral_basis_mlp_v1"),
-        ("experimental/interpolated_payne", "experimental_interpolated_payne_v1"),
-    ],
-)
-def test_native_intensity_and_off_grid_prediction_from_bundle(
-    tmp_path, family, family_id
-):
+@pytest.mark.parametrize("parameter_dim", [2, 11])
+def test_native_intensity_and_off_grid_prediction_from_bundle(tmp_path, parameter_dim):
     preset = transformer_payne_flux(profile="smoke")
-    # These settings also exercise the config and parameter layout of the trained bundle.
-    settings = dict(
-        grid_segments=[[1.0, 2.0, 128]],
-        log10_bounds=[-2.0, 3.0],
-        features="exojax_v1",
-        trainable_basis=True,
-        coefficient_head="mlp",
-        interpolation="linear",
-        full_precision_modes=None,
-    )
     cfg = replace(
         preset,
         model=replace(
-            preset.model, name=family, params=settings, init_hints={"parameter_dim": 8}
+            preset.model,
+            name=FAMILY,
+            params={"grid_segments": [[1.0, 2.0, 128]], "log10_bounds": [-2.0, 3.0]},
+            init_hints={"parameter_dim": parameter_dim},
         ),
     )
     loaded = Emulator.from_bundle(
         Emulator.from_config(cfg).save_bundle(tmp_path / "bundle")
     )
-    assert loaded.model_family_id == family_id
     assert FAMILY in get_supported_experimental_model_names()
-    assert (
-        "experimental/interpolated_payne"
-        not in get_supported_experimental_model_names()
+    core = nnx.merge(loaded.graphdef, loaded.params, loaded.model_state).core_model
+    assert core.basis.shape == (128, 128)
+    assert core.head.layers[0].kernel.shape[0] == parameter_dim
+    labels = jnp.linspace(-2, 3, 2 * parameter_dim, dtype=jnp.float32).reshape(
+        2, parameter_dim
     )
-    assert loaded.params["core_model"]["basis"].shape == (128, 128)
-    labels = jnp.broadcast_to(jnp.array([[0.3], [0.6]], dtype=jnp.float32), (2, 8))
+    np.testing.assert_array_equal(core.prepare_context(labels), core.head(labels))
     native = make_native_apply(loaded, linear_intensity=True)(labels)
     frozen = loaded.make_frozen_apply()
     q = jnp.array([[1 + 32.5 / 127, 0.9]], dtype=jnp.float64)
@@ -177,8 +162,9 @@ def test_native_intensity_and_off_grid_prediction_from_bundle(
     assert np.isnan(scaled[:, 1]).all()
 
 
-def test_reject_unsupported_prototype_settings():
-    with pytest.raises(ValueError, match="interpolation"):
+@pytest.mark.parametrize("key", ["features", "interpolation"])
+def test_reject_unknown_model_settings(key):
+    with pytest.raises(ValueError, match=key):
         SpectralBasisMLPConfig.from_dict(
-            {"grid_segments": [[0, 1, 128]], "interpolation": "cubic"}
+            {"grid_segments": [[0, 1, 128]], key: "custom"}
         )

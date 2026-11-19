@@ -37,7 +37,6 @@ TODO_MARKER = "<!-- aemu:todo"
 _X64_FAMILY_PREFIXES = (
     "transformer_payne",
     "experimental_spectral_basis_mlp_",
-    "experimental_interpolated_payne_",
     "experimental_mhe_mlp_",
     "experimental_mhe_transformer_payne_",
 )

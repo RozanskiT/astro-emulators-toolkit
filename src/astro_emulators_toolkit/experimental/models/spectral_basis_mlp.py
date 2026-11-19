@@ -1,8 +1,7 @@
-"""Atmospheric coefficient network and a low-rank, wavelength-explicit spectrum."""
+"""A coefficient MLP and a learned spectral basis for wavelength-explicit prediction."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 import math
 
@@ -13,7 +12,7 @@ from flax import nnx
 from ...models.activations import get_activation
 from ...models.mlp import MLP, MLPConfig
 from .mhe import _broadcast_spectral_inputs, _labels, _waves
-from .mhe_config import JSONConfig, choice, finite_float, positive_int, widths
+from .mhe_config import JSONConfig, finite_float, positive_int, widths
 
 
 @dataclass(frozen=True)
@@ -26,7 +25,6 @@ class SpectralBasisMLPConfig(JSONConfig):
     channels: int = 1
     activation: str = "silu"
     log10_bounds: tuple[float, float] | None = None
-    features: str = "labels"
 
     def __post_init__(self):
         positive_int("rank", self.rank)
@@ -35,7 +33,6 @@ class SpectralBasisMLPConfig(JSONConfig):
             self, "hidden_sizes", widths("hidden_sizes", self.hidden_sizes)
         )
         get_activation(self.activation)
-        choice("features", self.features, ("labels", "exojax_v1"))
         if self.log10_bounds is not None:
             lo, hi = (finite_float("log10 bound", v) for v in self.log10_bounds)
             if lo >= hi:
@@ -54,46 +51,6 @@ class SpectralBasisMLPConfig(JSONConfig):
             raise ValueError("grid_segments must provide at least rank spectral values")
         object.__setattr__(self, "grid_segments", tuple(segments))
 
-    @classmethod
-    def from_dict(cls, values):
-        # The trained ExoJAX bundle explicitly records these fixed choices.
-        if isinstance(values, Mapping):
-            values = dict(values)
-            fixed = dict(
-                interpolation="linear",
-                coefficient_head="mlp",
-                trainable_basis=True,
-                full_precision_modes=None,
-            )
-            for key, expected in fixed.items():
-                if values.pop(key, expected) != expected:
-                    raise ValueError(f"SpectralBasisMLP requires {key}={expected!r}")
-        return super().from_dict(values)
-
-
-def _exojax_features(x):
-    """Features used by the 128-mode ExoJAX coefficient network."""
-    # Canonical parameters are already in [0,1]. These nonlinear features are
-    # part of this particular trained coefficient network.
-    low = jnp.array([1000.0, 0.05, -6.0, -6.0, -6.0, -10.0, -3.0, 0.0])
-    span = jnp.array([700.0, 0.15, 5.0, 5.0, 5.0, 5.0, 8.0, 1.0])
-    p = low + x * span
-    t, alpha, cloud = p[:, :1], p[:, 1:2], p[:, 6:7]
-    log_mu = jnp.log10(jnp.maximum(p[:, 7:8], 1e-12))
-    depths = jnp.arange(-4, 2, dtype=jnp.float64)
-    return jnp.concatenate(
-        (
-            2 * x - 1,
-            log_mu,
-            1000 / t * 10 ** (-alpha * depths),
-            1000 / t * 10 ** (-alpha * cloud),
-            (p[:, 2:6] - log_mu) / 5,
-            cloud * log_mu,
-            alpha * log_mu,
-        ),
-        axis=-1,
-    ).astype(jnp.float32)
-
 
 class SpectralBasisMLP(nnx.Module):
     """Evaluate a low-rank spectrum at shared or row-specific wavelength queries."""
@@ -106,15 +63,8 @@ class SpectralBasisMLP(nnx.Module):
         if out_dim != 1:
             raise ValueError("The wavelength axis is supplied at evaluation time")
         self.in_dim, self.config = in_dim, cfg
-        num_features = in_dim
-        if cfg.features == "exojax_v1":
-            if in_dim != 8:
-                raise ValueError(
-                    "exojax_v1 requires the eight release-normalized labels"
-                )
-            num_features = 22
         self.head = MLP(
-            in_dim=num_features,
+            in_dim=in_dim,
             out_dim=cfg.rank,
             cfg=MLPConfig(hidden_sizes=cfg.hidden_sizes, activation=cfg.activation),
             rngs=rngs,
@@ -128,10 +78,7 @@ class SpectralBasisMLP(nnx.Module):
         )
 
     def prepare_context(self, labels):
-        x = _labels(labels, self.in_dim, jnp.float32)
-        if self.config.features == "exojax_v1":
-            x = _exojax_features(x)
-        return self.head(x)
+        return self.head(_labels(labels, self.in_dim, jnp.float32))
 
     def _decode(self, context):
         native = (context @ self.basis[...] + self.mean[...]).reshape(
@@ -201,11 +148,7 @@ def make_native_apply(emu, *, linear_intensity=False):
     segment order, with the same output convention as the canonical leaf.
     Set linear_intensity=True to exponentiate a log-intensity decoder directly.
     """
-    if (
-        emu.cfg.model.name
-        not in ("experimental/spectral_basis_mlp", "experimental/interpolated_payne")
-        or emu.graphdef is None
-    ):
+    if emu.cfg.model.name != "experimental/spectral_basis_mlp" or emu.graphdef is None:
         raise ValueError(
             "Load or initialize an experimental/spectral_basis_mlp emulator first"
         )

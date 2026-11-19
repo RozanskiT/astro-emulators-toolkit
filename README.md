@@ -869,11 +869,13 @@ with explicit input normalization and bundle export.
 ### Spectral Basis MLP (experimental)
 
 `experimental/spectral_basis_mlp` accepts the same canonical wavelength-explicit
-inputs and outputs as TransformerPayne and the MHE families. Its MLP evaluates
-the atmospheric labels once per row. By default, four 256-unit SiLU layers predict
-128 coefficients. Each coefficient weights one learned basis spectrum. Their sum
-plus a learned mean gives the spectrum on the native knots. Ordinary `fit` learns
-the MLP, basis and mean together.
+inputs and outputs as TransformerPayne and the MHE families. Its MLP takes each
+row of `parameters` directly. Choose the input columns for your dataset and apply
+any feature construction or scaling explicitly before both training and inference.
+By default, four 256-unit SiLU layers predict 128 coefficients once per row.
+Each coefficient weights one learned basis spectrum. Their sum plus a learned mean
+gives the spectrum on the native knots. Ordinary `fit` learns the MLP, basis
+and mean together.
 
 Start with the same flux or intensity preset and replace its model settings:
 
@@ -893,8 +895,7 @@ Configure the MLP with `hidden_sizes` and `activation`, and set `channels` for
 multiple outputs. For a normalized log-intensity target, set `log10_bounds` to
 the physical log10 bounds. The decoder then predicts log10 intensity at the
 knots, interpolates **physical intensity** in float32, and returns scaled log10 intensity
-in the canonical output leaf. The ExoJAX bundle also selects its trained
-`features="exojax_v1"` label transform. Other models use the supplied labels directly.
+in the canonical output leaf.
 
 The [flux training example](examples/experimental/08_train_wavelength_explicit_flux.py) accepts
 `--model spectral_basis_mlp` and exports and reloads a portable bundle. Bundles
