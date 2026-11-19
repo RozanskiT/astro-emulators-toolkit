@@ -140,17 +140,13 @@ def main() -> None:
         callbacks=build_callbacks_from_config(cfg),
         device_batch_transform=transform,
     )
-    inputs = {
-        "parameters": val_labels[:2],
-        "wavelengths": np.broadcast_to(wave_scaled, (2, len(wave_scaled))),
-    }
-    pred = emu.predict(inputs)["flux"]
+    physical = {"parameters": x_val[:2], "wavelengths": wave[None, :]}
+    pred = emu.predict(normalize_tree(physical, lo, hi))["flux"]
     bundle = emu.save_bundle(extras={"wavelength_angstrom": wave})
     # This checks portability, not held-out scientific accuracy.
     loaded = Emulator.from_bundle(bundle)
     ref = loaded.reference_scaling_inputs
     assert ref is not None
-    physical = {"parameters": x_val[:2], "wavelengths": wave[None, :]}
     scaled = normalize_tree(physical, ref["min_tree"], ref["max_tree"])
     np.testing.assert_array_equal(loaded.predict(scaled)["flux"], pred)
     print("Model:", cfg.model.name)
