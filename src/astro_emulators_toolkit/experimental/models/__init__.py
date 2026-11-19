@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from ...models import ModelRegistryEntry
@@ -10,18 +11,18 @@ from ..runtime_adapters import (
     SirenRuntimeAdapter,
 )
 from .explicit_wavelength_mlp import ExplicitWavelengthMLP, ExplicitWavelengthMLPConfig
-from .interpolated_payne import InterpolatedPayne, InterpolatedPayneConfig
 from .mhe import MHEMLP, MHETransformerPayne
 from .mhe_config import MHEMLPConfig, MHETransformerPayneConfig
 from .mlp_2d_regression import MLP2DRegression, MLP2DRegressionConfig
 from .siren import Siren, SirenConfig
+from .spectral_basis_mlp import SpectralBasisMLP, SpectralBasisMLPConfig
 
 _EXPERIMENTAL_MODEL_REGISTRY: dict[str, ModelRegistryEntry] = {
-    "interpolated_payne": ModelRegistryEntry(
-        public_name="experimental/interpolated_payne",
-        family_id="experimental_interpolated_payne_v1",
-        config_cls=InterpolatedPayneConfig,
-        model_cls=InterpolatedPayne,
+    "spectral_basis_mlp": ModelRegistryEntry(
+        public_name="experimental/spectral_basis_mlp",
+        family_id="experimental_spectral_basis_mlp_v1",
+        config_cls=SpectralBasisMLPConfig,
+        model_cls=SpectralBasisMLP,
         runtime=TransformerPayneRuntimeAdapter(),
     ),
     "mhe_mlp": ModelRegistryEntry(
@@ -68,6 +69,13 @@ def get_experimental_model_registry() -> dict[str, ModelRegistryEntry]:
 
 def get_experimental_model_entry(name: str) -> ModelRegistryEntry:
     key = str(name).lower()
+    # The trained pre-release bundle records both the prototype name and its family ID.
+    if key == "interpolated_payne":
+        return replace(
+            _EXPERIMENTAL_MODEL_REGISTRY["spectral_basis_mlp"],
+            public_name="experimental/interpolated_payne",
+            family_id="experimental_interpolated_payne_v1",
+        )
     if key not in _EXPERIMENTAL_MODEL_REGISTRY:
         raise KeyError(
             f"Unknown experimental model '{name}'. Available={list(_EXPERIMENTAL_MODEL_REGISTRY)}"

@@ -19,7 +19,7 @@ FAMILIES = {
     "transformer_payne": TRANSFORMER,
     "experimental/mhe_mlp": dict(hidden_sizes=[8], **HASH),
     "experimental/mhe_transformer_payne": dict(**TRANSFORMER, **HASH),
-    "experimental/interpolated_payne": dict(
+    "experimental/spectral_basis_mlp": dict(
         grid_segments=[[1.0, 1.5, 64], [1.7, 2.0, 64]],
         hidden_sizes=[8],
         log10_bounds=[-2.0, 3.0],

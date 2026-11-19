@@ -12,30 +12,31 @@ from astro_emulators_toolkit import Emulator
 from astro_emulators_toolkit.bundle import write_model_card
 from astro_emulators_toolkit.config import OptimConfig
 from astro_emulators_toolkit.data import TreeArrayDataset
-from astro_emulators_toolkit.experimental.models.interpolated_payne import (
-    InterpolatedPayne,
-    InterpolatedPayneConfig,
+from astro_emulators_toolkit.experimental.models.spectral_basis_mlp import (
+    SpectralBasisMLP,
+    SpectralBasisMLPConfig,
     make_native_apply,
 )
 from astro_emulators_toolkit.presets import (
     transformer_payne_flux,
     transformer_payne_intensity,
 )
+from astro_emulators_toolkit.resolver import get_supported_experimental_model_names
 
 jax.config.update("jax_enable_x64", True)
-FAMILY = "experimental/interpolated_payne"
+FAMILY = "experimental/spectral_basis_mlp"
 
 
 @pytest.mark.parametrize("channels", [1, 2])
 def test_segmented_interpolation_and_gradients(channels):
-    cfg = InterpolatedPayneConfig(
+    cfg = SpectralBasisMLPConfig(
         grid_segments=((0, 2, 3), (4, 7, 3)),
         rank=1,
         hidden_sizes=(4,),
         channels=channels,
         log10_bounds=(0, 2),
     )
-    model = InterpolatedPayne(in_dim=1, out_dim=1, cfg=cfg, rngs=nnx.Rngs(1))
+    model = SpectralBasisMLP(in_dim=1, out_dim=1, cfg=cfg, rngs=nnx.Rngs(1))
     log_i = np.array([0, 1, 0, 2, 0, 1], dtype=np.float32)
     model.mean[...] = jnp.asarray(np.repeat(log_i, channels))
     context = jnp.zeros((2, 1), dtype=jnp.float32)
@@ -110,7 +111,7 @@ def test_joint_fit_frozen_jax_and_bundle(tmp_path, channels):
     path = emu.save_bundle(tmp_path / "bundle")
     loaded = Emulator.from_bundle(path)
     np.testing.assert_array_equal(loaded.predict(x)["flux"], expected)
-    assert loaded.model_family_id == "experimental_interpolated_payne_v1"
+    assert loaded.model_family_id == "experimental_spectral_basis_mlp_v1"
     card = write_model_card(path).read_text()
     assert "JAX_ENABLE_X64=1" in card and "astro-emulators-toolkit>=0.2.3" in card
     frozen = loaded.make_frozen_apply(jit=True)
@@ -126,10 +127,19 @@ def test_joint_fit_frozen_jax_and_bundle(tmp_path, channels):
 )
 def test_bad_grid(segments):
     with pytest.raises(ValueError):
-        InterpolatedPayneConfig(grid_segments=segments, rank=1)
+        SpectralBasisMLPConfig(grid_segments=segments, rank=1)
 
 
-def test_native_intensity_and_off_grid_prediction_from_bundle(tmp_path):
+@pytest.mark.parametrize(
+    ("family", "family_id"),
+    [
+        (FAMILY, "experimental_spectral_basis_mlp_v1"),
+        ("experimental/interpolated_payne", "experimental_interpolated_payne_v1"),
+    ],
+)
+def test_native_intensity_and_off_grid_prediction_from_bundle(
+    tmp_path, family, family_id
+):
     preset = transformer_payne_flux(profile="smoke")
     # These settings also exercise the config and parameter layout of the trained bundle.
     settings = dict(
@@ -144,11 +154,17 @@ def test_native_intensity_and_off_grid_prediction_from_bundle(tmp_path):
     cfg = replace(
         preset,
         model=replace(
-            preset.model, name=FAMILY, params=settings, init_hints={"parameter_dim": 8}
+            preset.model, name=family, params=settings, init_hints={"parameter_dim": 8}
         ),
     )
     loaded = Emulator.from_bundle(
         Emulator.from_config(cfg).save_bundle(tmp_path / "bundle")
+    )
+    assert loaded.model_family_id == family_id
+    assert FAMILY in get_supported_experimental_model_names()
+    assert (
+        "experimental/interpolated_payne"
+        not in get_supported_experimental_model_names()
     )
     assert loaded.params["core_model"]["basis"].shape == (128, 128)
     labels = jnp.broadcast_to(jnp.array([[0.3], [0.6]], dtype=jnp.float32), (2, 8))
@@ -163,6 +179,6 @@ def test_native_intensity_and_off_grid_prediction_from_bundle(tmp_path):
 
 def test_reject_unsupported_prototype_settings():
     with pytest.raises(ValueError, match="interpolation"):
-        InterpolatedPayneConfig.from_dict(
+        SpectralBasisMLPConfig.from_dict(
             {"grid_segments": [[0, 1, 128]], "interpolation": "cubic"}
         )

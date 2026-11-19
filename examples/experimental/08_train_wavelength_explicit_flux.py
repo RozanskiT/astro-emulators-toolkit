@@ -37,7 +37,7 @@ def main() -> None:
             "transformer_payne",
             "mhe_mlp",
             "mhe_transformer_payne",
-            "interpolated_payne",
+            "spectral_basis_mlp",
         ),
         default="mhe_mlp",
     )
@@ -67,7 +67,7 @@ def main() -> None:
         # Frequency periods use the normalized wavelength coordinate of this example.
         spacing = float(np.min(np.diff(wave)) / (wave[-1] - wave[0]))
         params = {**cfg.model.params, "min_period": spacing}
-    elif args.model == "interpolated_payne":
+    elif args.model == "spectral_basis_mlp":
         params = {"grid_segments": [[0.0, 1.0, len(wave)]]}
     else:
         params = (

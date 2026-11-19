@@ -862,22 +862,23 @@ or pretrained weights. Implementation comparisons and bundle round trips establi
 numerical parity and portability; held-out residuals, boundaries, and realistic
 inference tests remain separate scientific validation work.
 
-Run [the MHE flux example](examples/experimental/08_train_mhe_flux.py) with
+Run [the wavelength-explicit flux example](examples/experimental/08_train_wavelength_explicit_flux.py) with
 `--model mhe_mlp` or `--model mhe_transformer_payne` for a complete native workflow
 with explicit input normalization and bundle export.
 
-### Interpolated Payne (experimental)
+### Spectral Basis MLP (experimental)
 
-`experimental/interpolated_payne` accepts the same canonical wavelength-explicit
+`experimental/spectral_basis_mlp` accepts the same canonical wavelength-explicit
 inputs and outputs as TransformerPayne and the MHE families. Its MLP evaluates
 the atmospheric labels once per row. By default, four 256-unit SiLU layers predict
-128 coefficients. A trainable basis and mean reconstruct the spectrum on native
-knots. Ordinary `fit` learns the MLP, basis and mean together.
+128 coefficients. Each coefficient weights one learned basis spectrum. Their sum
+plus a learned mean gives the spectrum on the native knots. Ordinary `fit` learns
+the MLP, basis and mean together.
 
 Start with the same flux or intensity preset and replace its model settings:
 
 ```python
-cfg = replace(cfg, model=replace(cfg.model, name="experimental/interpolated_payne",
+cfg = replace(cfg, model=replace(cfg.model, name="experimental/spectral_basis_mlp",
     params={"grid_segments": [[0.0, 1.0, 512]]}))
 ```
 
@@ -895,21 +896,21 @@ knots, interpolates **physical intensity** in float32, and returns scaled log10 
 in the canonical output leaf. The ExoJAX bundle also selects its trained
 `features="exojax_v1"` label transform. Other models use the supplied labels directly.
 
-The [flux training example](examples/experimental/08_train_mhe_flux.py) accepts
-`--model interpolated_payne` and exports and reloads a portable bundle. Bundles
+The [flux training example](examples/experimental/08_train_wavelength_explicit_flux.py) accepts
+`--model spectral_basis_mlp` and exports and reloads a portable bundle. Bundles
 using this experimental family require toolkit 0.2.3 or newer.
 
 ### Swapping wavelength-explicit models in a retrieval
 
 For `transformer_payne`, `experimental/mhe_mlp`, `experimental/mhe_transformer_payne`,
-and `experimental/interpolated_payne`, the same canonical call accepts atmospheric
+and `experimental/spectral_basis_mlp`, the same canonical call accepts atmospheric
 parameters `(B, P)` and float64 wavelengths `(B, Q)`. Each row can have its own
 Doppler-shifted wavelengths. A singleton batch on either input broadcasts across
 the other input, so `(1, Q)` shares one grid and `(1, P)` shares one atmosphere.
 Keep the input/output leaf names, channel order,
 and preprocessing from the bundle when using `predict`, `apply_jax`, or
 `make_frozen_apply`. All four use the same flux and intensity training batch transforms. In the
-[flux training example](examples/experimental/08_train_mhe_flux.py) select any
+[flux training example](examples/experimental/08_train_wavelength_explicit_flux.py) select any
 of the four with `--model`, using the family name without the namespace prefix.
 
 Pass the preprocessed inputs to the frozen JAX callable in the bundle's

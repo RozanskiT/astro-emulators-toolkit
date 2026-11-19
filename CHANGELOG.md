@@ -8,12 +8,14 @@ All notable user-facing changes to this project will be documented here.
 
 ### Added
 
-- Added `experimental/interpolated_payne`, a jointly trained 128-mode spectral
+- Added `experimental/spectral_basis_mlp`, a jointly trained 128-mode spectral
   model with direct linear interpolation and the TransformerPayne runtime
   contract. Bundles using this family require astro-emulators-toolkit 0.2.3
   or newer. Existing bundle and configuration format versions are unchanged.
-- TransformerPayne, both MHE families, and Interpolated Payne now support the
+- TransformerPayne, both MHE families, and Spectral Basis MLP now support the
   same singleton-batch broadcasting for atmospheric labels and wavelength grids.
+- Renamed the experimental flux training example to `08_train_wavelength_explicit_flux.py`.
+  Its `--model` option selects any of the four families.
 
 ## [0.2.2] - 2026-11-17
 

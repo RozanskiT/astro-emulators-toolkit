@@ -116,6 +116,7 @@ FIRST_LOADING_TOOLKIT: dict[str, dict[Any, str]] = {
 
 # New model families can require a newer runtime without changing bundle stamps.
 _MODEL_FIRST_LOADING_TOOLKIT = {
+    "experimental_spectral_basis_mlp_v1": "0.2.3",
     "experimental_interpolated_payne_v1": "0.2.3",
     "experimental_mhe_mlp_v1": "0.2.2",
     "experimental_mhe_transformer_payne_v1": "0.2.2",
