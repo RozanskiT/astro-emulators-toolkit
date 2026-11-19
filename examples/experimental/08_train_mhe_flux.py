@@ -1,4 +1,4 @@
-"""Train either experimental MHE family with the TransformerPayne flux workflow.
+"""Train an experimental wavelength-explicit family with the TransformerPayne flux workflow.
 
 Data: shipped irregular_flux Korg/MARCS spectra, deterministic 90/10 split.
 Creates: examples/runs/experimental_<model>_flux/{config.json,bundle} by default.
@@ -32,7 +32,9 @@ from _example_data import split_randomized_flux_arrays
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--model", choices=("mhe_mlp", "mhe_transformer_payne"), default="mhe_mlp"
+        "--model",
+        choices=("mhe_mlp", "mhe_transformer_payne", "interpolated_payne"),
+        default="mhe_mlp",
     )
     parser.add_argument(
         "--profile", choices=("smoke", "cpu_recommended"), default="smoke"
@@ -49,20 +51,23 @@ def main() -> None:
 
     cfg = transformer_payne_flux(profile=args.profile, workdir=str(workdir))
     # Keep the preset's task, optimizer, training, and runtime I/O contract.
-    params = (
-        {"hidden_sizes": [16 if smoke else 128] * 3}
-        if args.model == "mhe_mlp"
-        else dict(cfg.model.params)
-    )
-    params.update(
-        min_period=1.0 / (32 if smoke else 10000),
-        max_period=2.0,
-        mhe={
-            "levels": 4 if smoke else 16,
-            "log2_hashmap_size": 6 if smoke else 15,
-            "wavelength_range": [0.0, 1.0],
-        },
-    )
+    if args.model == "interpolated_payne":
+        params = {"grid_segments": [[0.0, 1.0, len(wave)]]}
+    else:
+        params = (
+            {"hidden_sizes": [16 if smoke else 128] * 3}
+            if args.model == "mhe_mlp"
+            else dict(cfg.model.params)
+        )
+        params.update(
+            min_period=1.0 / (32 if smoke else 10000),
+            max_period=2.0,
+            mhe={
+                "levels": 4 if smoke else 16,
+                "log2_hashmap_size": 6 if smoke else 15,
+                "wavelength_range": [0.0, 1.0],
+            },
+        )
     cfg = replace(
         cfg,
         model=replace(cfg.model, name=f"experimental/{args.model}", params=params),

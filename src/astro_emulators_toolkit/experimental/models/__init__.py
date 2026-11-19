@@ -10,12 +10,20 @@ from ..runtime_adapters import (
     SirenRuntimeAdapter,
 )
 from .explicit_wavelength_mlp import ExplicitWavelengthMLP, ExplicitWavelengthMLPConfig
+from .interpolated_payne import InterpolatedPayne, InterpolatedPayneConfig
 from .mhe import MHEMLP, MHETransformerPayne
 from .mhe_config import MHEMLPConfig, MHETransformerPayneConfig
 from .mlp_2d_regression import MLP2DRegression, MLP2DRegressionConfig
 from .siren import Siren, SirenConfig
 
 _EXPERIMENTAL_MODEL_REGISTRY: dict[str, ModelRegistryEntry] = {
+    "interpolated_payne": ModelRegistryEntry(
+        public_name="experimental/interpolated_payne",
+        family_id="experimental_interpolated_payne_v1",
+        config_cls=InterpolatedPayneConfig,
+        model_cls=InterpolatedPayne,
+        runtime=TransformerPayneRuntimeAdapter(),
+    ),
     "mhe_mlp": ModelRegistryEntry(
         public_name="experimental/mhe_mlp",
         family_id="experimental_mhe_mlp_v1",

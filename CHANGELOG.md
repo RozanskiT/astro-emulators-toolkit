@@ -4,6 +4,11 @@ All notable user-facing changes to this project will be documented here.
 
 ## [Unreleased]
 
+- Added `experimental/interpolated_payne`, a jointly trained 128-mode spectral
+  model with direct linear interpolation and the TransformerPayne runtime
+  contract. The ExoJAX helper returns physical intensities on a supplied vacuum
+  wavelength grid. Bundles using this family require a build containing it.
+
 ## [0.2.2] - 2026-11-17
 
 ### Added
