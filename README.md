@@ -862,9 +862,76 @@ or pretrained weights. Implementation comparisons and bundle round trips establi
 numerical parity and portability; held-out residuals, boundaries, and realistic
 inference tests remain separate scientific validation work.
 
-Run [the MHE flux example](examples/experimental/08_train_mhe_flux.py) with
+Run [the wavelength-explicit flux example](examples/experimental/08_train_wavelength_explicit_flux.py) with
 `--model mhe_mlp` or `--model mhe_transformer_payne` for a complete native workflow
 with explicit input normalization and bundle export.
+
+### Spectral Basis MLP (experimental)
+
+`experimental/spectral_basis_mlp` accepts the same canonical wavelength-explicit
+inputs and outputs as TransformerPayne and the MHE families. Its MLP takes each
+row of `parameters` directly. For min–max scaled training, call `normalize_tree`
+on the original inputs and record the same bounds in `reference_scaling_inputs`.
+Set `rank` to choose the number of learned basis spectra (default 128).
+The MLP predicts one coefficient per basis spectrum for each input row. Its
+default architecture has four 256-unit SiLU layers. The weighted sum plus a
+learned mean gives the spectrum on the native knots. Ordinary `fit` learns the
+MLP, basis and mean together.
+
+Start with the same flux or intensity preset and replace its model settings:
+
+```python
+cfg = replace(cfg, model=replace(cfg.model, name="experimental/spectral_basis_mlp",
+    params={"grid_segments": [[0.0, 1.0, 512]]}))
+```
+
+Specify each segment as `[first_coordinate, last_coordinate, knot_count]` in the
+coordinates supplied to the model. Knots are uniform within each segment.
+Keep wavelength coordinates in float64 and set `JAX_ENABLE_X64=1` before loading
+or training. The model linearly interpolates between adjacent knots and returns
+NaN in gaps and outside the segments. Wavelength derivatives are piecewise
+constant in the interpolated quantity and one-sided at segment endpoints.
+
+Configure the MLP with `hidden_sizes` and `activation`, and set `channels` for
+multiple outputs. For a normalized log-intensity target, set `log10_bounds` to
+the physical log10 bounds. The decoder then predicts log10 intensity at the
+knots, interpolates **physical intensity** in float32, and returns scaled log10 intensity
+in the canonical output leaf.
+
+The [flux training example](examples/experimental/08_train_wavelength_explicit_flux.py) accepts
+`--model spectral_basis_mlp` and exports and reloads a portable bundle. Bundles
+using this experimental family require toolkit 0.2.3 or newer.
+
+### Swapping wavelength-explicit models in a retrieval
+
+For `transformer_payne`, `experimental/mhe_mlp`, `experimental/mhe_transformer_payne`,
+and `experimental/spectral_basis_mlp`, the same canonical call accepts atmospheric
+parameters `(B, P)` and float64 wavelengths `(B, Q)`. Each row can have its own
+Doppler-shifted wavelengths. A singleton batch on either input broadcasts across
+the other input, so `(1, Q)` shares one grid and `(1, P)` shares one atmosphere.
+Keep the input/output leaf names, channel order,
+and preprocessing from the bundle when using `predict`, `apply_jax`, or
+`make_frozen_apply`. All four use the same flux and intensity training batch transforms. In the
+[flux training example](examples/experimental/08_train_wavelength_explicit_flux.py) select any
+of the four with `--model`, using the family name without the namespace prefix.
+
+For a bundle trained with min–max scaling, use the stored bounds to reproduce
+the training inputs. Supply wavelengths in the units recorded by the bundle.
+A shared grid has a leading batch dimension of one.
+
+```python
+from astro_emulators_toolkit import Emulator, normalize_tree
+
+emu = Emulator.from_bundle(bundle_path)
+apply = emu.make_frozen_apply()
+ref = emu.reference_scaling_inputs
+physical = {"parameters": labels, "wavelengths": wavelengths[None, :]}
+inputs = normalize_tree(physical, ref["min_tree"], ref["max_tree"])
+outputs = apply(inputs)
+```
+
+The bundle defines the output leaf and its scaling. The retrieval code applies
+any conversion to physical units.
 
 ### Transformer-specific notes
 

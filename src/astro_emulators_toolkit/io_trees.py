@@ -338,6 +338,11 @@ def validate_semantic_broadcast_leaf_shape(
     raise ValueError(f"{field_name} leaf '{path}' has unsupported mode '{mode}'.")
 
 
+def _normalize_leaf(value, lo, hi):
+    lo, hi = jnp.asarray(lo), jnp.asarray(hi)
+    return (jnp.asarray(value) - lo) / (hi - lo)
+
+
 def normalize_tree(value_tree, min_tree, max_tree):
     validate_same_structure(
         value_tree, min_tree, name_reference="value_tree", name_other="min_tree"
@@ -352,9 +357,7 @@ def normalize_tree(value_tree, min_tree, max_tree):
         require_positive_span=True,
     )
     return jax.tree.map(
-        lambda x, lo, hi: (
-            (jnp.asarray(x) - jnp.asarray(lo)) / (jnp.asarray(hi) - jnp.asarray(lo))
-        ),
+        _normalize_leaf,
         value_tree,
         min_tree,
         max_tree,

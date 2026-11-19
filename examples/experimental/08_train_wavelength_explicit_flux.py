@@ -1,7 +1,7 @@
-"""Train either experimental MHE family with the TransformerPayne flux workflow.
+"""Train TransformerPayne or an experimental wavelength-explicit model on the same flux data.
 
 Data: shipped irregular_flux Korg/MARCS spectra, deterministic 90/10 split.
-Creates: examples/runs/experimental_<model>_flux/{config.json,bundle} by default.
+Creates: examples/runs/<family>_flux/{config.json,bundle} by default.
 Runtime: seconds for the default smoke profile; minutes for cpu_recommended.
 Optional extras: none. Requires JAX_ENABLE_X64=1 (set below before importing JAX).
 Inputs are explicitly min/max normalized; continuum-normalized flux is unchanged.
@@ -32,15 +32,29 @@ from _example_data import split_randomized_flux_arrays
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--model", choices=("mhe_mlp", "mhe_transformer_payne"), default="mhe_mlp"
+        "--model",
+        choices=(
+            "transformer_payne",
+            "mhe_mlp",
+            "mhe_transformer_payne",
+            "spectral_basis_mlp",
+        ),
+        default="mhe_mlp",
     )
     parser.add_argument(
         "--profile", choices=("smoke", "cpu_recommended"), default="smoke"
     )
     parser.add_argument("--workdir", type=Path)
     args = parser.parse_args()
+    family = (
+        args.model
+        if args.model == "transformer_payne"
+        else f"experimental/{args.model}"
+    )
     workdir = args.workdir or (
-        Path(__file__).resolve().parents[1] / "runs" / f"experimental_{args.model}_flux"
+        Path(__file__).resolve().parents[1]
+        / "runs"
+        / f"{family.replace('/', '_')}_flux"
     )
     smoke = args.profile == "smoke"
     x_train, y_train, x_val, y_val, wave = split_randomized_flux_arrays(seed=2)
@@ -49,23 +63,30 @@ def main() -> None:
 
     cfg = transformer_payne_flux(profile=args.profile, workdir=str(workdir))
     # Keep the preset's task, optimizer, training, and runtime I/O contract.
-    params = (
-        {"hidden_sizes": [16 if smoke else 128] * 3}
-        if args.model == "mhe_mlp"
-        else dict(cfg.model.params)
-    )
-    params.update(
-        min_period=1.0 / (32 if smoke else 10000),
-        max_period=2.0,
-        mhe={
-            "levels": 4 if smoke else 16,
-            "log2_hashmap_size": 6 if smoke else 15,
-            "wavelength_range": [0.0, 1.0],
-        },
-    )
+    if args.model == "transformer_payne":
+        # Frequency periods use the normalized wavelength coordinate of this example.
+        spacing = float(np.min(np.diff(wave)) / (wave[-1] - wave[0]))
+        params = {**cfg.model.params, "min_period": spacing}
+    elif args.model == "spectral_basis_mlp":
+        params = {"grid_segments": [[0.0, 1.0, len(wave)]]}
+    else:
+        params = (
+            {"hidden_sizes": [16 if smoke else 128] * 3}
+            if args.model == "mhe_mlp"
+            else dict(cfg.model.params)
+        )
+        params.update(
+            min_period=1.0 / (32 if smoke else 10000),
+            max_period=2.0,
+            mhe={
+                "levels": 4 if smoke else 16,
+                "log2_hashmap_size": 6 if smoke else 15,
+                "wavelength_range": [0.0, 1.0],
+            },
+        )
     cfg = replace(
         cfg,
-        model=replace(cfg.model, name=f"experimental/{args.model}", params=params),
+        model=replace(cfg.model, name=family, params=params),
         io=replace(
             cfg.io,
             inputs=IOTreeSpec(
@@ -119,16 +140,15 @@ def main() -> None:
         callbacks=build_callbacks_from_config(cfg),
         device_batch_transform=transform,
     )
-    inputs = {
-        "parameters": val_labels[:2],
-        "wavelengths": np.broadcast_to(wave_scaled, (2, len(wave_scaled))),
-    }
-    pred = emu.predict(inputs)["flux"]
+    physical = {"parameters": x_val[:2], "wavelengths": wave[None, :]}
+    pred = emu.predict(normalize_tree(physical, lo, hi))["flux"]
     bundle = emu.save_bundle(extras={"wavelength_angstrom": wave})
     # This checks portability, not held-out scientific accuracy.
-    np.testing.assert_array_equal(
-        Emulator.from_bundle(bundle).predict(inputs)["flux"], pred
-    )
+    loaded = Emulator.from_bundle(bundle)
+    ref = loaded.reference_scaling_inputs
+    assert ref is not None
+    scaled = normalize_tree(physical, ref["min_tree"], ref["max_tree"])
+    np.testing.assert_array_equal(loaded.predict(scaled)["flux"], pred)
     print("Model:", cfg.model.name)
     print("Steps:", len(history.logs["training_loss"]))
     print("Prediction shape:", pred.shape)

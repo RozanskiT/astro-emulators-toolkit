@@ -14,8 +14,16 @@ from .mhe import MHEMLP, MHETransformerPayne
 from .mhe_config import MHEMLPConfig, MHETransformerPayneConfig
 from .mlp_2d_regression import MLP2DRegression, MLP2DRegressionConfig
 from .siren import Siren, SirenConfig
+from .spectral_basis_mlp import SpectralBasisMLP, SpectralBasisMLPConfig
 
 _EXPERIMENTAL_MODEL_REGISTRY: dict[str, ModelRegistryEntry] = {
+    "spectral_basis_mlp": ModelRegistryEntry(
+        public_name="experimental/spectral_basis_mlp",
+        family_id="experimental_spectral_basis_mlp_v1",
+        config_cls=SpectralBasisMLPConfig,
+        model_cls=SpectralBasisMLP,
+        runtime=TransformerPayneRuntimeAdapter(),
+    ),
     "mhe_mlp": ModelRegistryEntry(
         public_name="experimental/mhe_mlp",
         family_id="experimental_mhe_mlp_v1",
