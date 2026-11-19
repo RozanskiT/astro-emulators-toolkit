@@ -899,7 +899,7 @@ The [flux training example](examples/experimental/08_train_mhe_flux.py) accepts
 `--model interpolated_payne` and exports and reloads a portable bundle. Bundles
 using this experimental family require toolkit 0.2.3 or newer.
 
-### Swapping wavelength-explicit models in an ExoJAX retrieval
+### Swapping wavelength-explicit models in a retrieval
 
 For `transformer_payne`, `experimental/mhe_mlp`, `experimental/mhe_transformer_payne`,
 and `experimental/interpolated_payne`, the same canonical call accepts atmospheric
@@ -912,25 +912,17 @@ and preprocessing from the bundle when using `predict`, `apply_jax`, or
 [flux training example](examples/experimental/08_train_mhe_flux.py) select any
 of the four with `--model`, using the family name without the namespace prefix.
 
-For the single-intensity ExoJAX bundles, only the bundle path changes in the physical
-predictor below. Supply physical labels in the bundle’s eight-parameter order
-and a shared float64 grid of vacuum wavelengths in Å. A single label vector
-returns `(1, Q)` and a batch returns `(B, Q)`, both in the original specific
-intensity units per wavenumber. Recorded chip gaps and out-of-band wavelengths
-return NaN. Apply `jax.vmap(predict)` over surface elements for per-element grids.
+Pass the preprocessed inputs to the frozen JAX callable in the bundle's
+coordinate system. For a shared grid, keep an explicit leading batch dimension:
 
 ```python
-from astro_emulators_toolkit.experimental.exojax import make_exojax_predictor
-
 emu = Emulator.from_bundle(bundle_path)
-predict = make_exojax_predictor(emu)
-intensity = predict(physical_labels, wavelength_angstrom)
+apply = emu.make_frozen_apply()
+outputs = apply({"parameters": scaled_labels, "wavelengths": model_wavelengths[None, :]})
 ```
 
-The older ExoJAX TransformerPayne bundles use their recorded affine wavelength
-scale. The released MHE and 128-mode bundles use their recorded log10 wavelength
-convention. The predictor applies these conversions explicitly and uses the
-direct intensity interpolation path for the 128-mode model.
+The bundle defines the output leaf and its scaling. The retrieval code applies
+any conversion to physical units.
 
 ### Transformer-specific notes
 

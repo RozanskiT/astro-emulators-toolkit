@@ -12,7 +12,6 @@ from flax import nnx
 
 from ...models.activations import get_activation
 from ...models.mlp import MLP, MLPConfig
-from ..exojax import make_exojax_predictor as make_exojax_predictor
 from .mhe import _broadcast_spectral_inputs, _labels, _waves
 from .mhe_config import JSONConfig, choice, finite_float, positive_int, widths
 
@@ -212,17 +211,5 @@ def make_native_apply(emu, *, linear_intensity=False):
     def apply(labels):
         value, _ = native(labels, linear_intensity=linear_intensity)
         return value
-
-    return apply
-
-
-def _make_direct_intensity_apply(emu):
-    if emu.cfg.model.params.get("log10_bounds") is None:
-        raise ValueError("Physical intensity requires log10_bounds")
-    native = make_native_apply(emu, linear_intensity=True)
-    segments = emu.cfg.model.params["grid_segments"]
-
-    def apply(labels, wavelengths):
-        return _interpolate(native(labels), wavelengths, segments).astype(jnp.float64)
 
     return apply

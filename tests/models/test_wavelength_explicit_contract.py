@@ -8,8 +8,7 @@ import numpy as np
 import pytest
 
 from astro_emulators_toolkit import Emulator
-from astro_emulators_toolkit.config import IOTreeSpec, MinMaxTreeSpec
-from astro_emulators_toolkit.experimental.exojax import make_exojax_predictor
+from astro_emulators_toolkit.config import IOTreeSpec
 from astro_emulators_toolkit.presets import transformer_payne_flux
 
 jax.config.update("jax_enable_x64", True)
@@ -31,8 +30,6 @@ FAMILIES = {
 @pytest.mark.parametrize("family", FAMILIES)
 def test_same_retrieval_after_bundle_swap(tmp_path, family):
     preset = transformer_payne_flux(profile="smoke")
-    affine = family == "transformer_payne"
-    low, high = np.arange(1.0, 9.0), np.arange(2.0, 10.0) + 2
     cfg = replace(
         preset,
         model=replace(
@@ -45,58 +42,25 @@ def test_same_retrieval_after_bundle_swap(tmp_path, family):
             preset.io,
             inputs=IOTreeSpec(structure_tree={"parameters": None, "wavelengths": None}),
             outputs=IOTreeSpec(structure_tree={"log10_intensity": None}),
-            reference_scaling_inputs=MinMaxTreeSpec(
-                min_tree={
-                    "parameters": low.tolist(),
-                    "wavelengths": 10.0 if affine else 0.0,
-                },
-                max_tree={
-                    "parameters": high.tolist(),
-                    "wavelengths": 100.0 if affine else 1.0,
-                },
-            ),
-            reference_scaling_outputs=MinMaxTreeSpec(
-                min_tree={"log10_intensity": -2.0}, max_tree={"log10_intensity": 3.0}
-            ),
+            reference_scaling_inputs=None,
+            reference_scaling_outputs=None,
             input_domain=None,
         ),
     )
-    extras = {"chip_intervals_angstrom": [[10.0, 10**1.5], [10**1.7, 100.0]]}
-    if not affine:
-        extras.update(
-            wavelength_coordinate="log10_angstrom_legacy_roundtrip",
-            preprocessing={"legacy_wavelength_bounds": [10.0, 100.0]},
-        )
     emu = Emulator.from_bundle(
-        Emulator.from_config(cfg).save_bundle(tmp_path / "bundle", extras=extras)
+        Emulator.from_config(cfg).save_bundle(tmp_path / "bundle")
     )
     assert emu.bundle_metadata["runtime_contract"]["role_paths"] == {
         "parameter_leaf": "inputs/parameters",
         "wavelength_leaf": "inputs/wavelengths",
         "output_leaf": "outputs/log10_intensity",
     }
-    physical = make_exojax_predictor(emu)
     frozen = emu.make_frozen_apply()
-    p = jnp.asarray(low + np.array([[0.25], [0.6]]) * (high - low))
-    w = jnp.array([79.2, 19.3, 24.9, 19.3])
-
-    def canonical_inputs(p, w):
-        q = (
-            (w - 10.0) / 90.0
-            if affine
-            else jnp.log10(10.0 + ((w - 10.0) / 90.0) * 90.0)
-        )
-        return {
-            "parameters": ((p - low) / (high - low)).astype(jnp.float32),
-            "wavelengths": jnp.broadcast_to(q, (len(p), len(w))),
-        }
-
-    def reference(p, w):
-        y = frozen(canonical_inputs(p, w))["log10_intensity"].astype(jnp.float64)
-        return 10 ** (5 * y - 2)
-
-    x = canonical_inputs(p, w)
-    x["wavelengths"] = x["wavelengths"].at[1].set(x["wavelengths"][1, ::-1])
+    wavelengths = jnp.array([1.87, 1.23, 1.79, 1.23], dtype=jnp.float64)
+    x = {
+        "parameters": jnp.arange(16, dtype=jnp.float32).reshape(2, 8) / 16,
+        "wavelengths": jnp.stack((wavelengths, wavelengths[::-1])),
+    }
     host = emu.predict(x)["log10_intensity"]
     for apply in (emu.apply_jax, frozen):
         np.testing.assert_allclose(
@@ -112,21 +76,9 @@ def test_same_retrieval_after_bundle_swap(tmp_path, family):
             rtol=1e-5,
             atol=1e-6,
         )
-    y = physical(p, w)
-    assert y.shape == (2, 4) and y.dtype == jnp.float64
-    np.testing.assert_allclose(y, reference(p, w), rtol=3e-6)
-    np.testing.assert_allclose(physical(p[0], w), y[:1], rtol=3e-6)
-    gaps = jnp.array([9.0, 40.0, 101.0])
-    assert np.isnan(physical(p, gaps)).all()
-
-    def grads(predict):
-        return jax.grad(lambda a, q: jnp.log(predict(a, q)).sum(), argnums=(0, 1))(p, w)
-
-    for g, ref in zip(grads(physical), grads(reference), strict=True):
-        assert np.isfinite(g).all()
-        np.testing.assert_allclose(g, ref, rtol=2e-4, atol=2e-5)
-    with pytest.raises(ValueError, match="wavelengths"):
-        physical(p, w[None, :])
+    grads = jax.grad(lambda inputs: frozen(inputs)["log10_intensity"].sum())(x)
+    for key, grad in grads.items():
+        assert grad.shape == x[key].shape and np.isfinite(grad).all()
 
 
 @pytest.mark.parametrize("family", FAMILIES)

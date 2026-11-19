@@ -13,7 +13,7 @@ All notable user-facing changes to this project will be documented here.
   contract. Bundles using this family require astro-emulators-toolkit 0.2.3
   or newer. Existing bundle and configuration format versions are unchanged.
 - TransformerPayne, both MHE families, and Interpolated Payne now support the
-  same singleton-batch broadcasting and experimental ExoJAX physical predictor.
+  same singleton-batch broadcasting for atmospheric labels and wavelength grids.
 
 ## [0.2.2] - 2026-11-17
 
