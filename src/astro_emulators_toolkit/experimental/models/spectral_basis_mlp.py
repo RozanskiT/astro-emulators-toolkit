@@ -9,6 +9,7 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 
+from ...io_trees import _normalize_leaf
 from ...models.activations import get_activation
 from ...models.mlp import MLP, MLPConfig
 from .mhe import _broadcast_spectral_inputs, _labels, _waves
@@ -95,7 +96,7 @@ class SpectralBasisMLP(nnx.Module):
                 raise ValueError("Physical intensity requires log10_bounds")
             return jnp.power(jnp.float32(10), native)
         if bounds is not None:
-            return (native - bounds[0]) / (bounds[1] - bounds[0])
+            return _normalize_leaf(native, *bounds)
         return native
 
     def predict_queries(self, context, wavelengths):
@@ -105,7 +106,7 @@ class SpectralBasisMLP(nnx.Module):
             return _interpolate(native, wavelengths, self.config.grid_segments)
         intensity = jnp.power(jnp.float32(10), native)
         y = _interpolate(intensity, wavelengths, self.config.grid_segments)
-        return (jnp.log10(y) - bounds[0]) / (bounds[1] - bounds[0])
+        return _normalize_leaf(jnp.log10(y), *bounds)
 
     def predict_one(self, context, wavelengths):
         w = _waves(wavelengths, len(context), one=True)

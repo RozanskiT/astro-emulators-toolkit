@@ -870,8 +870,8 @@ with explicit input normalization and bundle export.
 
 `experimental/spectral_basis_mlp` accepts the same canonical wavelength-explicit
 inputs and outputs as TransformerPayne and the MHE families. Its MLP takes each
-row of `parameters` directly. Choose the input columns for your dataset and apply
-any feature construction or scaling explicitly before both training and inference.
+row of `parameters` directly. For min–max scaled training, call `normalize_tree`
+on the original inputs and record the same bounds in `reference_scaling_inputs`.
 By default, four 256-unit SiLU layers predict 128 coefficients once per row.
 Each coefficient weights one learned basis spectrum. Their sum plus a learned mean
 gives the spectrum on the native knots. Ordinary `fit` learns the MLP, basis
@@ -914,13 +914,19 @@ and preprocessing from the bundle when using `predict`, `apply_jax`, or
 [flux training example](examples/experimental/08_train_wavelength_explicit_flux.py) select any
 of the four with `--model`, using the family name without the namespace prefix.
 
-Pass the preprocessed inputs to the frozen JAX callable in the bundle's
-coordinate system. For a shared grid, keep an explicit leading batch dimension:
+For a bundle trained with min–max scaling, use the stored bounds to reproduce
+the training inputs. Supply wavelengths in the units recorded by the bundle.
+A shared grid has a leading batch dimension of one.
 
 ```python
+from astro_emulators_toolkit import Emulator, normalize_tree
+
 emu = Emulator.from_bundle(bundle_path)
 apply = emu.make_frozen_apply()
-outputs = apply({"parameters": scaled_labels, "wavelengths": model_wavelengths[None, :]})
+ref = emu.reference_scaling_inputs
+physical = {"parameters": labels, "wavelengths": wavelengths[None, :]}
+inputs = normalize_tree(physical, ref["min_tree"], ref["max_tree"])
+outputs = apply(inputs)
 ```
 
 The bundle defines the output leaf and its scaling. The retrieval code applies
