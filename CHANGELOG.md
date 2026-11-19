@@ -4,9 +4,14 @@ All notable user-facing changes to this project will be documented here.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-19
+
+### Added
+
 - Added `experimental/interpolated_payne`, a jointly trained 128-mode spectral
   model with direct linear interpolation and the TransformerPayne runtime
-  contract. Bundles using this family require a build containing it.
+  contract. Bundles using this family require astro-emulators-toolkit 0.2.3
+  or newer. Existing bundle and configuration format versions are unchanged.
 - TransformerPayne, both MHE families, and Interpolated Payne now support the
   same singleton-batch broadcasting and experimental ExoJAX physical predictor.
 

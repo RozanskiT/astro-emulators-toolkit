@@ -113,7 +113,7 @@ def test_joint_fit_frozen_jax_and_bundle(tmp_path, channels):
     np.testing.assert_array_equal(loaded.predict(x)["flux"], expected)
     assert loaded.model_family_id == "experimental_interpolated_payne_v1"
     card = write_model_card(path).read_text()
-    assert "JAX_ENABLE_X64=1" in card and "development toolkit" in card
+    assert "JAX_ENABLE_X64=1" in card and "astro-emulators-toolkit>=0.2.3" in card
     frozen = loaded.make_frozen_apply(jit=True)
     np.testing.assert_allclose(frozen(x)["flux"], expected, rtol=2e-5, atol=2e-6)
     g = jax.grad(lambda q: frozen({**x, "parameters": q})["flux"].sum())(

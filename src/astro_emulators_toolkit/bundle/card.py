@@ -339,17 +339,11 @@ def render_generated_section(
 
     minimum = minimum_loading_toolkit_version(dict(metadata))
     lines += ["", "## Requirements", ""]
-    if family == "experimental_interpolated_payne_v1" and minimum is None:
-        lines.append(
-            "- Install the development toolkit wheel or source checkout providing "
-            "`experimental/interpolated_payne` before loading this bundle."
-        )
-    else:
-        lines.append(
-            f'- `pip install "astro-emulators-toolkit>={minimum}"`'
-            if minimum
-            else "- astro-emulators-toolkit (minimum version unknown for this bundle)"
-        )
+    lines.append(
+        f'- `pip install "astro-emulators-toolkit>={minimum}"`'
+        if minimum
+        else "- astro-emulators-toolkit (minimum version unknown for this bundle)"
+    )
     if needs_x64:
         lines.append(
             "- `JAX_ENABLE_X64=1` set before JAX is imported (this model family "

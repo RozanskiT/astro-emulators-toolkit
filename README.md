@@ -897,7 +897,7 @@ in the canonical output leaf. The ExoJAX bundle also selects its trained
 
 The [flux training example](examples/experimental/08_train_mhe_flux.py) accepts
 `--model interpolated_payne` and exports and reloads a portable bundle. Bundles
-using this experimental family require a checkout or build containing it.
+using this experimental family require toolkit 0.2.3 or newer.
 
 ### Swapping wavelength-explicit models in an ExoJAX retrieval
 

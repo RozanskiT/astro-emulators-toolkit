@@ -116,6 +116,7 @@ FIRST_LOADING_TOOLKIT: dict[str, dict[Any, str]] = {
 
 # New model families can require a newer runtime without changing bundle stamps.
 _MODEL_FIRST_LOADING_TOOLKIT = {
+    "experimental_interpolated_payne_v1": "0.2.3",
     "experimental_mhe_mlp_v1": "0.2.2",
     "experimental_mhe_transformer_payne_v1": "0.2.2",
 }
@@ -134,9 +135,6 @@ def minimum_loading_toolkit_version(metadata: dict[str, Any]) -> str | None:
     """
     from ..config.migrations import wrote_v2_meaning
 
-    # This experimental family is currently available only in the development source.
-    if metadata.get("model_family_id") == "experimental_interpolated_payne_v1":
-        return None
     needed: list[str] = []
     for field, table in FIRST_LOADING_TOOLKIT.items():
         stamp = (
